@@ -187,20 +187,21 @@ services:
     command: --schedule "0 0 4 * * *" --cleanup
     network_mode: bridge
 
-  organizr:
-    image: organizr/organizr:latest
-    container_name: organizr
+  homer:
+    image: b4bz/homer:latest
+    container_name: homer
     volumes:
-      - /docker/organizr:/config
+      - /docker/homer:/www/assets
     ports:
-      - "90:80"
+      - 8080:8080
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.organizr.loadbalancer.server.port=80"
-      - "traefik.http.routers.organizr.rule=Host(${TRAEFIK_BITWARDEN})"
-      - "traefik.http.routers.organizr.entrypoints=websecure"
-      - "traefik.http.routers.organizr.tls=true"
-      - "traefik.http.routers.organizr.tls.certresolver=tcr"
+      traefik.enable: true
+      traefik.http.services.homer-service.loadbalancer.server.port: 8080
+      traefik.http.routers.homer.service: homer-service
+      traefik.http.routers.homer.rule: Host(`${TRAEFIK_HOMER}`)
+      traefik.http.routers.homer.entrypoints: websecure
+      traefik.http.routers.homer.tls: true
+      traefik.http.routers.homer.tls.certresolver: tcr
     restart: unless-stopped
     network_mode: bridge
 
