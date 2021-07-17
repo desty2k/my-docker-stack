@@ -293,3 +293,11 @@ services:
     ports:
       - '80:80'
     network_mode: bridge
+
+    remotely:
+      image: translucency/remotely:latest
+      ports:
+        - 5000:5000
+      volumes:
+        - /docker/remotely/:/remotely-data
+      network_mode: bridge
