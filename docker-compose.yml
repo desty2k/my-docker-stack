@@ -20,11 +20,11 @@ networks:
 
 services:
   unbound:
-    image: "mvance/unbound-rpi:latest"
+    image: mvance/unbound-rpi:latest
     container_name: unbound
     restart: unless-stopped
     volumes:
-      - "/docker/unbound:/opt/unbound/etc/unbound/"
+      - /docker/unbound:/opt/unbound/etc/unbound/
     networks:
       vpn:
         ipv4_address: 10.2.0.200
@@ -37,21 +37,21 @@ services:
       - NET_ADMIN
       - SYS_MODULE
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ="${TIMEZONE}"
-      - SERVERPORT=51820
-      - SERVERURL=${TRAEFIK_WIREGUARD}
-      #- SERVERURL=my.ddns.net #optional - For use with DDNS (Uncomment to use)
-      - PEERS=1 # How many peers to generate for you (clients)
-      - PEERDNS=10.2.0.100 # Set it to point to pihole
-      - INTERNAL_SUBNET=10.6.0.0
+      PUID: 1000
+      PGID: 1000
+      TZ: ${TIMEZONE}
+      SERVERPORT: 51820
+      SERVERURL: ${TRAEFIK_WIREGUARD}
+      #SERVERURL: my.ddns.net #optional - For use with DDNS (Uncomment to use)
+      PEERS: 1 # How many peers to generate for you (clients)
+      PEERDNS: 10.2.0.100 # Set it to point to pihole
+      INTERNAL_SUBNET: 10.6.0.0
 
     volumes:
       - /docker/wireguard:/config
       - /lib/modules:/lib/modules
     ports:
-      - "51820:51820/udp"
+      - 51820:51820/udp
     dns:
       - 10.2.0.100 # Points to pihole
       - 10.2.0.200 # Points to unbound
@@ -62,11 +62,11 @@ services:
       vpn:
         ipv4_address: 10.2.0.3
     labels:
-      - "traefik.enable=true"
-      # - "traefik.docker.network=vpn"
-      - "traefik.udp.routers.wireguard.entrypoints=wireguard"
-      - "traefik.udp.routers.wireguard.service=wireguard"
-      - "traefik.udp.services.wireguard.loadbalancer.server.port=51820"
+      traefik.enable: true
+      #traefik.docker.network: vpn
+      traefik.udp.routers.wireguard.entrypoints: wireguard
+      traefik.udp.routers.wireguard.service: wireguard
+      traefik.udp.services.wireguard.loadbalancer.server.port: 51820
 
   pihole:
     depends_on: [unbound]
@@ -87,8 +87,8 @@ services:
       MAXDBDAYS: 7
     # Volumes store your data between container upgrades
     volumes:
-      - "/docker/pihole/pihole/:/etc/pihole/"
-      - "/docker/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
+      - /docker/pihole/pihole/:/etc/pihole/
+      - /docker/pihole/dnsmasq.d/:/etc/dnsmasq.d/
     # Recommended but not required (DHCP needs NET_ADMIN)
     #   https://github.com/pi-hole/docker-pi-hole#note-on-capabilities
     cap_add:
@@ -100,24 +100,23 @@ services:
         ipv4_address: 10.2.0.100
 
   homeassistant:
-    depends_on: [unbound, pihole]
     container_name: home-assistant
-    # hostname: home-assistant
     image: homeassistant/raspberrypi4-homeassistant:stable
     volumes:
       - /docker/homeassistant:/config
     environment:
-      - TZ="${TIMEZONE}"
+      TZ: ${TIMEZONE}
     restart: always
     ports:
       - 8123:8123
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.home-assistant.loadbalancer.server.port=8123"
-      - "traefik.http.routers.home-assistant.rule=Host(${TRAEFIK_HOMEASSISTANT})"
-      - "traefik.http.routers.home-assistant.entrypoints=websecure"
-      - "traefik.http.routers.home-assistant.tls=true"
-      - "traefik.http.routers.home-assistant.tls.certresolver=tcr"
+      traefik.enable: true
+      traefik.http.services.home-assistant-service.loadbalancer.server.port: 8123
+      traefik.http.routers.home-assistant.rule: Host(`${TRAEFIK_HOMEASSISTANT}`)
+      traefik.http.routers.home-assistant.entrypoints: websecure
+      traefik.http.routers.home-assistant.tls: true
+      traefik.http.routers.home-assistant.tls.certresolver: tcr
+      traefik.http.routers.home-assistant.service: home-assistant-service
     privileged: true
     network_mode: bridge
 
@@ -166,15 +165,15 @@ services:
       - "--entrypoints.wireguard.address=:51820/udp"
 
       - "--certificatesresolvers.tcr.acme.tlschallenge=true"
-      - "--certificatesresolvers.tcr.acme.email=${TRAEFIK_EMAIL}"
+      - "--certificatesresolvers.tcr.acme.email=`${TRAEFIK_EMAIL}`"
       - "--certificatesresolvers.tcr.acme.storage=/letsencrypt/acme.json"
     volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "/docker/letsencrypt:/letsencrypt"
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /docker/letsencrypt:/letsencrypt
 
     ports:
-      - "443:443"
-      - "8070:8080"
+      - 443:443
+      - 8070:8080
     restart: unless-stopped
     network_mode: bridge
 
@@ -209,7 +208,7 @@ services:
     image: raymondmm/tasmoadmin
     container_name: tasmoadmin
     ports:
-      - 5555:80
+      - 8010:80
     volumes:
       - /docker/tasmoadmin:/data
     restart: unless-stopped
@@ -219,12 +218,12 @@ services:
     container_name: tasmobackup
     image: danmed/tasmobackupv1
     ports:
-      - 8259:80
+      - 8020:80
     volumes:
       - /docker/tasmobackup:/var/www/html/data
     environment:
-      - DBTYPE=sqlite
-      - DBNAME=data/tasmobackup
+      DBTYPE: sqlite
+      DBNAME: data/tasmobackup
     restart: unless-stopped
     network_mode: bridge
 
@@ -236,12 +235,12 @@ services:
     volumes:
       - /docker/bitwarden:/data
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.bitwarden.loadbalancer.server.port=80"
-      - "traefik.http.routers.bitwarden.rule=Host(${TRAEFIK_BITWARDEN})"
-      - "traefik.http.routers.bitwarden.entrypoints=websecure"
-      - "traefik.http.routers.bitwarden.tls=true"
-      - "traefik.http.routers.bitwarden.tls.certresolver=tcr"
+      traefik.enable: true
+      traefik.http.services.bitwarden.loadbalancer.server.port: 80
+      traefik.http.routers.bitwarden.rule: Host(`${TRAEFIK_BITWARDEN}`)
+      traefik.http.routers.bitwarden.entrypoints: websecure
+      traefik.http.routers.bitwarden.tls: true
+      traefik.http.routers.bitwarden.tls.certresolver: tcr
     restart: unless-stopped
     network_mode: bridge
 
@@ -250,16 +249,16 @@ services:
     image: kpine/zwave-js-server:latest
     restart: unless-stopped
     environment:
-      NETWORK_KEY: "${ZWAVE_NETWORK_KEY}"
+      NETWORK_KEY: ${ZWAVE_NETWORK_KEY}
       LOGTOFILE: "true"
       TZ: ${TIMEZONE}
     devices:
-      - '/dev/ttyACM0:/dev/zwave'
+      - /dev/ttyACM0:/dev/zwave
     volumes:
       - /docker/zjs/cache:/cache
       - /docker/zjs/logs:/logs
     ports:
-      - '3000:3000'
+      - 3000:3000
     network_mode: bridge
 
   noisy-mqtt:
@@ -267,9 +266,9 @@ services:
     image: desty2k/noisy-mqtt:latest
     restart: "no"
     environment:
-      HOST: "${ZJS_SERVER_ADDRESS}"
-      USERNAME: "${ZJS_USERNAME}"
-      PASSWORD: "${ZJS_PASSWORD}"
+      HOST: ${ZJS_SERVER_ADDRESS}
+      USERNAME: ${ZJS_USERNAME}
+      PASSWORD: ${ZJS_PASSWORD}
       TZ: ${TIMEZONE}
     network_mode: bridge
 
@@ -284,15 +283,16 @@ services:
       - NGINX_PORT=80
       - TZ="${TIMEZONE}"
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.nginx.rule=Host(${TRAEFIK_NGINX})"
-      - "traefik.http.routers.nginx.entrypoints=websecure"
-      - "traefik.http.routers.nginx.tls=true"
-      - "traefik.http.routers.nginx.tls.certresolver=tcr"
-      - traefik.http.routers.nginx.service=nginx-service
-      - "traefik.http.services.nginx-service.loadbalancer.server.port=80"
+      traefik.enable: true
+      traefik.http.services.nginx-service.loadbalancer.server.port: 80
+      traefik.http.routers.nginx.rule: Host(`${TRAEFIK_NGINX}`)
+      traefik.http.routers.nginx.entrypoints: websecure
+      traefik.http.routers.nginx.tls: true
+      traefik.http.routers.nginx.tls.certresolver: tcr
+      traefik.http.routers.nginx.service: nginx-service
+
     ports:
-      - '80:80'
+      - 80:80
     network_mode: bridge
 
     remotely:
