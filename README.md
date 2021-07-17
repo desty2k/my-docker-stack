@@ -16,5 +16,28 @@ My personal docker stack running on RaspberryPi 4 model B.
 - Noisy MQTT - random network traffic generator
 - Tasmoadmin - manager for Tasmota devices
 - Tasmobackup - backup for Tasmota devices
-- Organizr - homepage with links for all services
+- Homer - homepage with links for all services
+- Remotely - remote control for desktops  
 - Watchtower - Docker images updater
+
+## How to use?
+
+1. Clone this repository using `git`
+
+```shell
+git clone https://github.com/desty2k/my-docker-stack.git
+```
+
+2. Change current working directory
+
+```shell
+cd my-docker-stack
+```
+
+3. Update __all__ values in `.env` file
+4. Create containers with `docker-compose`
+
+```shell
+docker-compose up -d
+```
+
