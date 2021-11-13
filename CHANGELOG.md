@@ -1,5 +1,8 @@
 # Changelog
 
+- 0.0.3:
+  - Add `config` for second RPi
+
 - 0.0.2:
   - Add `.env` file
   - Add `How to use?` section to readme  
