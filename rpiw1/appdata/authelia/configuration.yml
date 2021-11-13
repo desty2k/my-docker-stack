@@ -1,0 +1,139 @@
+###############################################################
+#                   Authelia configuration                    #
+###############################################################
+
+# All secrets are loaded from files
+
+server:
+  host: 0.0.0.0
+  port: 9091
+
+log:
+  level: debug
+
+# Landing page
+# https://docs.authelia.com/configuration/miscellaneous.html#default-redirection-url
+default_redirection_url: https://home.example.com
+
+totp:
+  issuer: example.com
+  period: 30
+  skew: 1
+
+duo_api:
+  hostname: "<DUO_ENDPOINT>"
+  integration_key: "<INTEGRATION_KEY>"
+
+
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+    # customize passwords based on https://docs.authelia.com/configuration/authentication/file.html
+    password:
+      algorithm: sha512
+      iterations: 1
+      key_length: 32
+      salt_length: 16
+      memory: 1024
+      parallelism: 8
+
+# https://docs.authelia.com/configuration/access-control.html
+access_control:
+  networks:
+    - name: internal
+      networks:
+        - 192.168.20.0/24
+        - 192.168.10.0/24
+    - name: VPN
+      networks: 10.6.0.0/16
+
+  default_policy: deny
+  rules:
+    # Allow free access from local network
+    - domain: "*.example.com"
+      networks:
+        - internal
+        - VPN
+      policy: bypass
+
+    # Login page
+    - domain: "login.example.com"
+      policy: bypass
+
+    # Mobile app
+    - domain: "homeassistant.example.com"
+      policy: bypass
+      resources:
+        - "^/api.*"
+        - "^/auth/token.*"
+        - "^/.external_auth=."
+        - "^/service_worker.js"
+        - "^/static/.*"
+
+    # Browser plugin + mobile app access
+    - domain: "bitwarden.example.com"
+      resources:
+        - "^/api.*$"
+        - "^/identity.*$"
+        - "^/icons.*$"
+        - "^/notifications.*$"
+      policy: bypass
+
+    # Normal users have access to two subdomains: home. and homeassistant.
+    # Admins have access to all subdomains
+    - domain: "home.example.com"
+      policy: two_factor
+      subject:
+        - "group:users"
+
+    - domain: "homeassistant.example.com"
+      policy: two_factor
+      subject:
+        - "group:users"
+
+    - domain: "*.example.com"
+      policy: two_factor
+      subject:
+        - "group:admins"
+
+session:
+  name: authelia_session
+  # This secret can also be set using the env variables AUTHELIA_SESSION_SECRET_FILE
+  # Used a different secret, but the same site as jwt_secret above.
+  # secret: SECRET_GOES_HERE # use docker secret file instead AUTHELIA_SESSION_SECRET_FILE
+  expiration: 3600 # 1 hour
+  inactivity: 300 # 5 minutes
+  domain: example.com # Should match whatever your root protected domain is
+
+  redis:
+    host: redis
+    port: 6379
+
+regulation:
+  max_retries: 3
+  find_time: 120
+  ban_time: 300
+
+storage:
+  mysql:
+    # MariaDB database. Create database "authelia" before starting Authelia container!!!
+    # It is recommended not to use root account
+    host: <SERVER_IP>
+    port: 3306
+    database: authelia
+    username: authelia
+
+# For testing purpose, notifications can be sent in a file.
+notifier:
+  filesystem:
+    filename: /config/notification.txt
+
+#  smtp:
+#    username: SMTP_USERNAME
+#    # This secret can also be set using the env variables AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE
+#    # password: # use docker secret file instead AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE
+#    host: SMTP_HOST
+#    port: 587 #465
+#    sender: SENDER_EMAIL
+
+

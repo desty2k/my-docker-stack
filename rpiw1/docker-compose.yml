@@ -1,0 +1,362 @@
+version: "3.9"
+
+
+secrets:
+  authelia_jwt_secret:
+    file: $SECRETS/authelia_jwt_secret
+  authelia_session_secret:
+    file: $SECRETS/authelia_session_secret
+  authelia_storage_mysql_password:
+    file: $SECRETS/authelia_storage_mysql_password
+  authelia_storage_redis_password:
+    file: $SECRETS/authelia_storage_redis_password
+#  authelia_notifier_smtp_password:
+#    file: $SECRETS/authelia_notifier_smtp_password
+  authelia_duo_api_secret_key:
+    file: $SECRETS/authelia_duo_api_secret_key
+  traefik_pilot_token:
+    file: $SECRETS/traefik_pilot_token
+  mysql_root_password:
+    file: $SECRETS/mysql_root_password
+  my_email:
+    file: $SECRETS/my_email
+  duckdns_token:
+    file: $SECRETS/duckdns_token
+
+
+networks:
+  default:
+    name: internal
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+#  vpn:
+#    name: vpn
+#    ipam:
+#      driver: default
+#      config:
+#        - subnet: 172.20.0.0/16
+#          gateway: 172.20.0.1
+
+services:
+  ############################# EXPOSING SERVICES / CONNECTION
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    volumes:
+      - $APPDATA/traefik2/rules:/rules
+      - $APPDATA/traefik2/acme:/acme
+      - $APPDATA/traefik2/logs:/logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    secrets:
+      - duckdns_token
+    environment:
+      # https://doc.traefik.io/traefik/reference/static-configuration/env/
+      TZ: $TZ
+      DUCKDNS_TOKEN_FILE: /run/secrets/duckdns_token
+
+      TRAEFIK_PILOT_TOKEN: $TRAEFIK_PILOT_TOKEN
+      TRAEFIK_LOG_LEVEL: DEBUG
+      TRAEFIK_ACCESSLOG: true
+      TRAEFIK_ACCESSLOG_BUFFERINGSIZE: 100
+      TRAEFIK_ACCESSLOG_FILEPATH: /logs/traefik.log
+      TRAEFIK_API: true
+      TRAEFIK_API_INSECURE: true
+      TRAEFIK_API_DASHBOARD: true
+
+      TRAEFIK_PROVIDERS_DOCKER: true
+      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: false
+      TRAEFIK_PROVIDERS_FILE_DIRECTORY: /rules
+
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns: true
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_EMAIL: $MY_EMAIL
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_DNSCHALLENGE: true
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_STORAGE: /acme/acme.json
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_DNSCHALLENGE_PROVIDER: duckdns
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_DNSCHALLENGE_DELAYBEFORECHECK: 0
+
+      TRAEFIK_ENTRYPOINTS_web: false
+      TRAEFIK_ENTRYPOINTS_web_ADDRESS: :80
+
+      TRAEFIK_ENTRYPOINTS_websecure: true
+      TRAEFIK_ENTRYPOINTS_websecure_ADDRESS: :443
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS: true
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_CERTRESOLVER: duckdns
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_MAIN: $DOMAINNAME
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_SANS: "*.$DOMAINNAME"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    networks:
+      default:
+        ipv4_address: 172.20.0.200
+    labels:
+      traefik.enable: true
+      traefik.http.services.traefik-svc.loadbalancer.server.port: 8080
+      traefik.http.routers.traefik-rtr.service: traefik-svc
+      traefik.http.routers.traefik-rtr.rule: Host(`traefik.$DOMAINNAME`)
+      traefik.http.routers.traefik-rtr.entrypoints: websecure
+      traefik.http.routers.traefik-rtr.middlewares: chain-authelia@file
+
+  authelia:
+    image: authelia/authelia
+    container_name: authelia
+    volumes:
+      - $APPDATA/authelia:/config
+    labels:
+      traefik.enable: true
+      traefik.http.routers.authelia-rtr.rule: Host(`login.$DOMAINNAME`)
+      traefik.http.routers.authelia-rtr.entrypoints: websecure
+      traefik.http.routers.authelia-rtr.middlewares: chain-authelia@file
+      traefik.http.routers.authelia-rtr.service: authelia-svc
+      traefik.http.services.authelia-svc.loadbalancer.server.port: 9091
+    ports:
+      - "9091:9091"
+    secrets:
+      - authelia_jwt_secret
+      - authelia_session_secret
+      - mysql_root_password
+      - authelia_storage_redis_password
+      # - authelia_notifier_smtp_password
+      - authelia_duo_api_secret_key
+    environment:
+      TZ: $TZ
+      AUTHELIA_JWT_SECRET_FILE: /run/secrets/authelia_jwt_secret
+      AUTHELIA_SESSION_SECRET_FILE: /run/secrets/authelia_session_secret
+      AUTHELIA_STORAGE_MYSQL_PASSWORD_FILE: /run/secrets/mysql_root_password
+      AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
+      # AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE: /run/secrets/authelia_notifier_smtp_password
+      AUTHELIA_DUO_API_SECRET_KEY_FILE: /run/secrets/authelia_duo_api_secret_key
+    restart: unless-stopped
+
+  wireguard-sts:
+    image: linuxserver/wireguard:latest
+    container_name: wireguard-sts
+    environment:
+      TZ: $TZ
+    volumes:
+      - $APPDATA/wireguard-sts:/config
+    ports:
+      - "61920:51820/udp"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv4.conf.all.src_valid_mark: 1
+    restart: unless-stopped
+    networks:
+      default:
+        ipv4_address: 172.20.0.100
+
+  ############################# DATABASES
+  # Redis - Key-value Store
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    command: ["bash", "-c",
+              'docker-entrypoint.sh --appendonly yes --requirepass "$$(cat $$AUTHELIA_SESSION_REDIS_PASSWORD_FILE)" --maxmemory 512mb --maxmemory-policy allkeys-lru']
+    ports:
+      - "6379:6379"
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - authelia_storage_redis_password
+    environment:
+      TZ: $TZ
+      AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
+    volumes:
+      - $APPDATA/redis/data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+  mariadb:
+    image: linuxserver/mariadb:latest
+    container_name: mariadb
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    volumes:
+      - $APPDATA/mariadb/config:/config
+      - $APPDATA/mariadb/mysql:/var/lib/mysql
+    environment:
+      TZ: $TZ
+      FILE__MYSQL_ROOT_PASSWORD: /run/secrets/mysql_root_password  # Note FILE__ (double underscore)
+    secrets:
+      - mysql_root_password
+
+  phpmyadmin:
+    image: arm64v8/phpmyadmin:latest
+    container_name: phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8010:80"
+    environment:
+      TZ: $TZ
+      # PMA_ARBITRARY: 1
+      PMA_HOST: $SERVER_IP
+      PMA_PORT: 3306
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+    secrets:
+      - mysql_root_password
+    depends_on:
+      - mariadb
+    labels:
+      traefik.enable: true
+      traefik.http.routers.phpmyadmin-rtr.service: phpmyadmin-svc
+      traefik.http.services.phpmyadmin-svc.loadbalancer.server.port: 80
+      traefik.http.routers.phpmyadmin-rtr.rule: Host(`phpmyadmin.$DOMAINNAME`)
+      traefik.http.routers.phpmyadmin-rtr.entrypoints: websecure
+      traefik.http.routers.phpmyadmin-rtr.middlewares: chain-authelia@file
+
+  ############################# DNS SERVERS
+  # If using built-in DHCP server AdGuard always set itself as primary DNS server.
+  # To fix it add following option to DHCP server configuration under $APPDATA/adguard/conf/AdguardHome.yaml.
+  # options:
+  #    - 6 ips XXX.XXX.XXX.XXX,9.9.9.9
+  # Where XXX.XXX.XXX.XXX is $SERVER_IP.
+  adguard:
+    image: adguard/adguardhome
+    container_name: adguard
+    restart: unless-stopped
+    volumes:
+      - $APPDATA/adguard/work:/opt/adguardhome/work
+      - $APPDATA/adguard/conf:/opt/adguardhome/conf
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "3000:3000"
+    networks:
+      default:
+        ipv4_address: $ADGUARD_IP
+
+  # If we want to use AdGuard/Pi-Hole as DHCP server in bridge mode,
+  # we have to forward all DHCP requests from internal Docker network
+  # to our local network.
+  dhcphelper:
+    image: homeall/dhcphelper:latest
+    container_name: dhcphelper
+    restart: unless-stopped
+    environment:
+      IP: $ADGUARD_IP
+      TZ: $TZ
+    depends_on:
+      - adguard
+    cap_add:
+      - NET_ADMIN
+    network_mode: host
+
+  ############################# CONTAINER MANAGEMENT
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - $APPDATA/portainer:/data
+    ports:
+      - "9000:9000"
+
+
+ ############################# SMART HOME
+  homeassistant:
+    image: homeassistant/raspberrypi4-homeassistant:stable
+    container_name: homeassistant
+    volumes:
+      - $APPDATA/homeassistant:/config
+    environment:
+      TZ: $TZ
+    restart: always
+    ports:
+      - "8123:8123"
+    privileged: true
+    labels:
+      traefik.enable: true
+      traefik.http.routers.ha-rtr.rule: Host(`homeassistant.$DOMAINNAME`)
+      traefik.http.routers.ha-rtr.entrypoints: websecure
+      traefik.http.services.ha-svc.loadbalancer.server.port: 8123
+      traefik.http.routers.ha-rtr.service: ha-svc
+      traefik.http.routers.ha-rtr.middlewares: chain-authelia@file
+
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - $APPDATA/mosquitto/config:/mosquitto/config
+      - $APPDATA/mosquitto/data:/mosquitto/data
+      - $APPDATA/mosquitto/log:/mosquitto/log
+    environment:
+      TZ: $TZ
+    restart: unless-stopped
+
+
+  ############################# MAINTENANCE
+  # DuckDNS - auto update DDNS
+  duckdns:
+    image: lscr.io/linuxserver/duckdns
+    container_name: duckdns
+    environment:
+      - PUID=$PUID #optional
+      - PGID=$PGID
+      - TZ=$TZ
+      - SUBDOMAINS=$DOMAINNAME
+      - TOKEN=$DUCKDNS_TOKEN
+      - LOG_FILE=false
+    volumes:
+      - $APPDATA/duckdns/config:/config
+    restart: unless-stopped
+
+  # Traefik Certs Dumper - Extract LetsEncrypt Certificates - Traefik2 Compatible
+  certdumper:
+    image: humenius/traefik-certs-dumper:arm64v8
+    container_name: certdumper
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - $APPDATA/traefik2/acme:/traefik:ro
+      - $SHARED/certs:/output:rw
+      # - /var/run/docker.sock:/var/run/docker.sock:ro # Only needed if restarting containers
+    environment:
+      DOMAIN: $DOMAINNAME
+    network_mode: none
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: always
+    environment:
+      TZ: $TZ
+      WATCHTOWER_SCHEDULE: 0 0 3 * * *
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_DEBUG: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  whoami:
+    image: traefik/whoami
+    container_name: whoami
+    labels:
+      traefik.enable: true
+      traefik.http.routers.whoami-rtr.entrypoints: websecure
+      traefik.http.routers.whoami-rtr.tls: false
+      traefik.http.routers.whoami-rtr.rule: Host(`whoami.$DOMAINNAME`)
+      traefik.http.routers.whoami-rtr.service: whoami-svc
+      traefik.http.services.whoami-svc.loadbalancer.server.port: 80
+      traefik.http.routers.phpmyadmin-rtr.middlewares: chain-authelia@file
+    ports:
+      - "9010:80"
+    environment:
+      TZ: $TZ
+    restart: unless-stopped

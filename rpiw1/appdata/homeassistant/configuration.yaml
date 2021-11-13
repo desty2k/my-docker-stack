@@ -1,0 +1,24 @@
+# Configure a default setup of Home Assistant (frontend, api, etc)
+default_config:
+
+# enable after installing "Remote Home Assistant" from HACS
+#remote_homeassistant:
+#  instances:
+
+# Allow access via Traefik
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.20.0.200
+
+frontend:
+  themes: !include_dir_merge_named themes
+
+# Text to speech
+tts:
+  - platform: google_translate
+
+group: !include groups.yaml
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
