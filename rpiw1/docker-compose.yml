@@ -354,7 +354,7 @@ services:
       traefik.http.routers.whoami-rtr.rule: Host(`whoami.$DOMAINNAME`)
       traefik.http.routers.whoami-rtr.service: whoami-svc
       traefik.http.services.whoami-svc.loadbalancer.server.port: 80
-      traefik.http.routers.phpmyadmin-rtr.middlewares: chain-authelia@file
+      traefik.http.routers.whoami-rtr.middlewares: chain-authelia@file
     ports:
       - "9010:80"
     environment:
