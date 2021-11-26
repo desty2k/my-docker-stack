@@ -1,6 +1,3 @@
-version: "3.9"
-
-
 secrets:
   authelia_jwt_secret:
     file: $SECRETS/authelia_jwt_secret
