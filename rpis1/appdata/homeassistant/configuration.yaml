@@ -1,0 +1,87 @@
+default_config:
+
+influxdb:
+  api_version: 2
+  ssl: false
+  host: influxdb
+  port: 8086
+  token: INFLUXDB_TOKEN
+  organization: INFLUXDB_ORGANIZATION
+  bucket: homeassistant
+  tags_attributes:
+    - friendly_name
+  exclude:
+    domains:
+      - automation
+      - group
+
+
+tts:
+  - platform: google_translate
+
+group: !include groups.yaml
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+frontend:
+  themes: !include_dir_merge_named themes
+
+pyscript:
+  allow_all_imports: true
+
+#spotify:
+#  client_id:
+#  client_secret:
+
+binary_sensor:
+  - platform: workday
+    country: PL
+
+sensor:
+  - platform: systemmonitor
+    resources:
+      - type: disk_use_percent
+        arg: /home
+      - type: memory_free
+
+# Shutters controlled with RF remote
+#cover:
+#  - platform: template
+#    covers:
+#      salon_1:
+#        device_class: shutter
+#        position_template: 50
+#        friendly_name: "Salon Roleta 1"
+#        open_cover:
+#          service: script.otworz_rolete_1
+#        close_cover:
+#          service: script.zamknij_rolete_1
+#        stop_cover:
+#          service: script.zatrzymaj_rolete_1
+#      salon_2:
+#        device_class: shutter
+#        position_template: 50
+#        friendly_name: "Salon Roleta 2"
+#        open_cover:
+#          service: script.otworz_rolete_2
+#        close_cover:
+#          service: script.zamknij_rolete_2
+#        stop_cover:
+#          service: script.zatrzymaj_rolete_2
+#      salon_3:
+#        device_class: shutter
+#        position_template: 50
+#        friendly_name: "Salon Roleta 3"
+#        open_cover:
+#          service: script.otworz_rolete_3
+#        close_cover:
+#          service: script.zamknij_rolete_3
+#        stop_cover:
+#          service: script.zatrzymaj_rolete_3
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.10.0.200
+
