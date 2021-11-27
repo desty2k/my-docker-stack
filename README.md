@@ -5,8 +5,12 @@ in diffrent network subnets: `rpis1` in `192.168.10.0/24` and `rpiw1` in `192.16
 both networks are pernamently connected with Site-to-Site VPN tunnel, 
 so `rpis1` can reach devices in `rpiw1`'s network and vice versa.
 
-## RPiS1 Services
-RaspberryPi 4B 4 GB running in `192.168.10.0/24` network. Internal Docker network address is `172.10.0.0/16`.
+## RPiS1
+
+Networks:
+- LAN - `192.168.10.0/24`
+- Docker internal - `172.10.0.0/16`
+- Docker VPN - `10.10.0.0/24`
 
 ### Connection
 - Traefik
@@ -46,8 +50,12 @@ RaspberryPi 4B 4 GB running in `192.168.10.0/24` network. Internal Docker networ
 - Nginx
 - Whoami
 
-## RPiW1 Services
-RaspberryPi 4B 4 GB running in `192.168.20.0/24` network. Internal Docker network address is `172.20.0.0/16`.
+## RPiW1
+
+Networks:
+- LAN - `192.168.20.0/24`
+- Docker internal - `172.20.0.0/16`
+- Docker VPN - `10.20.0.0/24`
 
 ### Connection
 - DuckDNS
