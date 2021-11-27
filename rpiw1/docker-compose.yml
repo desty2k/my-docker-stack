@@ -30,13 +30,12 @@ networks:
         - subnet: 172.20.0.0/16
           gateway: 172.20.0.1
 
-#  vpn:
-#    name: vpn
-#    ipam:
-#      driver: default
-#      config:
-#        - subnet: 172.20.0.0/16
-#          gateway: 172.20.0.1
+  vpn:
+    name: vpn
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.20.0.0/24
 
 services:
   ############################# EXPOSING SERVICES / CONNECTION
@@ -155,6 +154,42 @@ services:
       default:
         ipv4_address: 172.20.0.100
 
+  wg-easy:
+    image: weejewel/wg-easy
+    container_name: wg-easy
+    depends_on: [unbound, adguard]
+    environment:
+      WG_HOST: wireguard.$DOMAINNAME
+      PASSWORD: ""
+      WG_PORT: 51920
+      WG_DEFAULT_ADDRESS: 10.6.0.x
+      WG_DEFAULT_DNS: 10.20.0.100
+      WG_ALLOWED_IPS: 192.168.10.0/24, 192.168.20.0/24, 10.20.0.0/24
+    volumes:
+      - $APPDATA/wg-easy/:/etc/wireguard
+    ports:
+      - "51920:51820/udp"
+      - "51821:51821/tcp"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv4.conf.all.src_valid_mark: 1
+    dns:
+      - 10.20.0.100 # Points to adguard
+      - 10.20.0.200 # Points to unbound
+    restart: unless-stopped
+    labels:
+      traefik.enable: true
+      traefik.udp.routers.wg-easy-rtr.entrypoints: wg-easy
+      traefik.udp.routers.wg-easy-rtr.service: wg-easy-svc
+      traefik.udp.services.wg-easy-svc.loadbalancer.server.port: 51920
+      com.centurylinklabs.watchtower.enable: false
+    networks:
+      vpn:
+        ipv4_address: 10.20.0.50
+
   ############################# DATABASES
   # Redis - Key-value Store
   redis:
@@ -225,6 +260,7 @@ services:
   adguard:
     image: adguard/adguardhome
     container_name: adguard
+    depends_on: [unbound]
     restart: unless-stopped
     volumes:
       - $APPDATA/adguard/work:/opt/adguardhome/work
@@ -242,9 +278,14 @@ services:
       traefik.http.routers.adguard-rtr.rule: Host(`adguard.$DOMAINNAME`)
       traefik.http.routers.adguard-rtr.entrypoints: websecure
       traefik.http.routers.adguard-rtr.middlewares: chain-authelia@file
+    dns:
+      - 10.20.0.200 # Points to unbound
+      - 9.9.9.9
     networks:
       default:
-        ipv4_address: $ADGUARD_IP
+        ipv4_address: $ADGUARD_INTERNAL_IP
+      vpn:
+        ipv4_address: 10.20.0.100
 
   # If we want to use AdGuard/Pi-Hole as DHCP server in bridge mode,
   # we have to forward all DHCP requests from internal Docker network
@@ -254,13 +295,26 @@ services:
     container_name: dhcphelper
     restart: unless-stopped
     environment:
-      IP: $ADGUARD_IP
+      IP: $ADGUARD_INTERNAL_IP
       TZ: $TZ
     depends_on:
       - adguard
     cap_add:
       - NET_ADMIN
     network_mode: host
+
+  unbound:
+    image: mvance/unbound-rpi:1.13.1
+    container_name: unbound
+    restart: unless-stopped
+    volumes:
+      - $APPDATA/unbound:/opt/unbound/etc/unbound/
+    environment:
+      TZ: $TZ
+    networks:
+      vpn:
+        ipv4_address: 10.20.0.200
+
 
   ############################# CONTAINER MANAGEMENT
   portainer:
