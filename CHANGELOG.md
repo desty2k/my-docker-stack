@@ -1,5 +1,12 @@
 # Changelog
 
+- 0.1.1:
+  - RPiW1
+    - Add VPN network
+    - Add `wg-easy` container for remote access
+    - Add `unbound` DNS server
+    - Traefik - redirect http connections to https
+
 - 0.1.0:
   - Add reworked rpis1 compose and all needed files
   - Add installation steps for both rpis
