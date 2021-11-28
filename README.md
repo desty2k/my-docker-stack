@@ -71,6 +71,7 @@ Networks:
 
 ### DNS servers
 - Adguard
+- Unbound
 - DHCPHelper
 
 ### Databases

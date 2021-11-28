@@ -71,7 +71,7 @@ $SERVER_IP - static IP of your server set in .env file
    ```
 8. For each user generate password using `hash-password`
    ```shell
-   authelia hash-password -c /config/configuration.yml
+   authelia hash-password -c /config/configuration.yml USER_PASSWORD_GOES_HERE
    ```
 9. To exit shell use `exit` command
 10. Open `/docker/appdata/authelia/users_database.yml` with text editor

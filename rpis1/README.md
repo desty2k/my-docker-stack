@@ -73,7 +73,7 @@ $SERVER_IP - static IP of your server set in .env file
    ```
 8. For each user generate password using `hash-password`
    ```shell
-   authelia hash-password -c /config/configuration.yml
+   authelia hash-password -c /config/configuration.yml USER_PASSWORD_GOES_HERE
    ```
 9. To exit shell use `exit` command
 10. Open `/docker/appdata/authelia/users_database.yml` with text editor
@@ -88,8 +88,8 @@ $SERVER_IP - static IP of your server set in .env file
 2. Follow first setup steps
 3. Click your avatar on the level then click `About`
 4. Copy and save your `Organization ID`, we will need it later
-5. Go to `Data` then `Buckets` with 7 days retention
-6. Create `homeassistant` and `rpis1` buckets
+5. Go to `Data` then `Buckets`
+6. Create `homeassistant` and `rpis1` buckets with 7 days retention
 7. Go to `API Tokens`
 8. Create `Grafana` token with read permission to all containers
 9. Create `Home Assistant` token with write permission to `homeassistant` bucket
