@@ -68,7 +68,10 @@ access_control:
         - "^/auth/token.*"
         - "^/.external_auth=."
         - "^/service_worker.js"
-        - "^/static/.*"
+        - "^/static.*"
+        - "^/local.*"
+        - "^/hacsfiles.*"
+        - "^/frontend_latest.*"
 
     # Browser plugin + mobile app access
     - domain: "bitwarden.example.com"
