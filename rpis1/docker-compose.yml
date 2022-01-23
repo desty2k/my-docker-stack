@@ -385,7 +385,7 @@ services:
       traefik.http.routers.influxdb-rtr.middlewares: chain-authelia@file
 
   bitwarden:
-    image: bitwardenrs/server:latest
+    image: vaultwarden/server:latest
     container_name: bitwarden
     restart: unless-stopped
     ports:
