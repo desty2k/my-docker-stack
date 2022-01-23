@@ -21,18 +21,28 @@ duo_api:
   hostname: ""
   integration_key: ""
 
-
 authentication_backend:
-  file:
-    path: /config/users_database.yml
-    # customize passwords based on https://docs.authelia.com/configuration/authentication/file.html
-    password:
-      algorithm: sha512
-      iterations: 1
-      key_length: 32
-      salt_length: 16
-      memory: 1024
-      parallelism: 8
+  disable_reset_password: false
+  refresh_interval: 5m
+  ldap:
+    implementation: custom
+    url: ldaps://openldap
+    timeout: 5s
+    start_tls: false
+    tls:
+      server_name: ldap.example.com
+      skip_verify: false
+      minimum_version: TLS1.3
+    base_dn: DC=example,DC=com
+    username_attribute: uid
+    additional_users_dn: ou=users
+    users_filter: (&({username_attribute}={input})(objectClass=inetOrgPerson))
+    additional_groups_dn: ou=groups
+    groups_filter: (&(memberUid={input})(objectClass=posixGroup))
+    group_name_attribute: cn
+    mail_attribute: mail
+    display_name_attribute: displayName
+    user: CN=admin,DC=example,DC=com
 
 # https://docs.authelia.com/configuration/access-control.html
 access_control:
@@ -56,6 +66,11 @@ access_control:
     - domain: "login.example.com"
       policy: bypass
 
+    - domain: "influxdb.example.com"
+      policy: bypass
+      resources:
+        - "^/api/v2/write.*"
+
     - domain: "homeassistant.example.com"
       policy: bypass
       resources:
@@ -67,6 +82,19 @@ access_control:
         - "^/local.*"
         - "^/hacsfiles.*"
         - "^/frontend_latest.*"
+
+    - domain: "bitwarden.example.com"
+      resources:
+        - "^/api.*$"
+        - "^/identity.*$"
+        - "^/icons.*$"
+        - "^/notifications.*$"
+      policy: bypass
+
+    - domain: "home.example.com"
+      policy: two_factor
+      subject:
+        - "group:users"
 
     - domain: "homeassistant.example.com"
       policy: two_factor
@@ -84,7 +112,6 @@ session:
   inactivity: 300 # 5 minutes
   domain: example.com # Should match whatever your root protected domain is
 
-# Optional. Can improve performance on a busy system. If not enabled, session info is stored in memory.
   redis:
     host: redis
     port: 6379
@@ -97,7 +124,7 @@ regulation:
 storage:
   mysql:
   # MySQL allows running multiple authelia instances. Create database and enter details below.
-    host: mysql
+    host: mariadb
     port: 3306
     database: authelia
     username: authelia
