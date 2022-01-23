@@ -17,6 +17,24 @@ Networks:
 - Authelia
 - Wireguard StS
 - Wireguard Easy
+- Certdumper
+- Duckdns
+
+### Databases
+- Redis
+- MariaDB
+- InfluxDB
+- PhpMyAdmin
+- OpenLDAP
+- Bitwarden (Vaultwarden)
+
+### DNS servers
+- Pi-Hole
+- Unbound
+
+### Container management
+- Portainer
+- Watchtower
 
 ### Smart home
 - Home Assistant
@@ -24,26 +42,12 @@ Networks:
 - Mosquitto
 - Tasmobackup
 - Tasmoadmin
-- NoisyMQTT
-
-### DNS servers
-- Pi-Hole
-- Unbound
-
-### Databases
-- Redis
-- MariaDB
-- InfluxDB
-- PhpMyAdmin
-- Bitwarden
-
-### Container management
-- Portainer
-- Watchtower
+- NTP server
 
 ### Telemetry and monitoring
 - Telegraf
 - Grafana
+- Unifi
 
 ### Web servers
 - Homer
