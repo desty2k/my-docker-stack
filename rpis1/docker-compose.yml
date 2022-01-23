@@ -1,8 +1,12 @@
 secrets:
+  authelia_storage_encryption_key:
+    file: $SECRETS/authelia_storage_encryption_key
   authelia_jwt_secret:
     file: $SECRETS/authelia_jwt_secret
   authelia_session_secret:
     file: $SECRETS/authelia_session_secret
+  authelia_ldap_password:
+    file: $SECRETS/authelia_ldap_password
   authelia_storage_mysql_password:
     file: $SECRETS/authelia_storage_mysql_password
   authelia_storage_redis_password:
@@ -17,6 +21,8 @@ secrets:
     file: $SECRETS/mysql_root_password
   my_email:
     file: $SECRETS/my_email
+  duckdns_token:
+    file: $SECRETS/duckdns_token
 
 # After changing network settings use 'docker compose up -d --force-recreate' to avoid `network ... not found` errors.
 networks:
@@ -41,19 +47,21 @@ services:
     image: traefik:latest
     container_name: traefik
     restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8070:8080"
     volumes:
       - $APPDATA/traefik2/rules:/rules
       - $APPDATA/traefik2/acme:/acme
       - $APPDATA/traefik2/logs:/logs
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      - "443:443"
-      - "8070:8080"
     environment:
       TZ: $TZ
+      DUCKDNS_TOKEN_FILE: /run/secrets/duckdns_token
       # https://doc.traefik.io/traefik/reference/static-configuration/env/
       TRAEFIK_PILOT_TOKEN: $TRAEFIK_PILOT_TOKEN
-      TRAEFIK_LOG_LEVEL: DEBUG
+      TRAEFIK_LOG_LEVEL: INFO
       TRAEFIK_ACCESSLOG: true
       TRAEFIK_ACCESSLOG_BUFFERINGSIZE: 100
       TRAEFIK_ACCESSLOG_FILEPATH: /logs/traefik.log
@@ -70,13 +78,34 @@ services:
       TRAEFIK_CERTIFICATESRESOLVERS_letsencrypt_ACME_STORAGE: /acme/acme.json
       TRAEFIK_CERTIFICATESRESOLVERS_letsencrypt_ACME_TLSCHALLENGE: true
 
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns: true
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_EMAIL: $MY_EMAIL
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_DNSCHALLENGE: true
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_STORAGE: /acme/acme2.json
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_DNSCHALLENGE_PROVIDER: duckdns
+      TRAEFIK_CERTIFICATESRESOLVERS_duckdns_ACME_DNSCHALLENGE_DELAYBEFORECHECK: 0
+
+      TRAEFIK_ENTRYPOINTS_web: true
+      TRAEFIK_ENTRYPOINTS_web_ADDRESS: :80
+      TRAEFIK_ENTRYPOINTS_web_HTTP_REDIRECTIONS_ENTRYPOINT_TO: websecure
+
       TRAEFIK_ENTRYPOINTS_websecure: true
       TRAEFIK_ENTRYPOINTS_websecure_ADDRESS: :443
       TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS: true
-      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_CERTRESOLVER: letsencrypt
-    #      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_MAIN: $DOMAINNAME
-    #      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_SANS: "*.$DOMAINNAME"
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_CERTRESOLVER: duckdns
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_MAIN: $DOMAINNAME
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_SANS: "*.$DOMAINNAME"
 
+      # ldap + ldaps
+      TRAEFIK_ENTRYPOINTS_ldap-tcp: true
+      TRAEFIK_ENTRYPOINTS_ldap-tcp_ADDRESS: :389/tcp
+      TRAEFIK_ENTRYPOINTS_ldap-udp: true
+      TRAEFIK_ENTRYPOINTS_ldap-udp_ADDRESS: :389/udp
+      TRAEFIK_ENTRYPOINTS_ldaps: true
+      TRAEFIK_ENTRYPOINTS_ldaps_ADDRESS: :636/tcp
+
+      TRAEFIK_ENTRYPOINTS_wg-easy: true
+      TRAEFIK_ENTRYPOINTS_wg-easy_ADDRESS: :51920/udp
     labels:
       traefik.enable: true
       traefik.http.services.traefik-svc.loadbalancer.server.port: 8080
@@ -86,80 +115,71 @@ services:
       traefik.http.routers.traefik-rtr.middlewares: chain-authelia@file
     networks:
       default:
-        ipv4_address: 172.10.0.200
+        ipv4_address: $INTERNAL_TRAEFIK_IP
+    secrets:
+      - duckdns_token
 
   authelia:
     image: authelia/authelia
     container_name: authelia
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
     volumes:
       - $APPDATA/authelia:/config
+    environment:
+      TZ: $TZ
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/authelia_storage_encryption_key
+      AUTHELIA_JWT_SECRET_FILE: /run/secrets/authelia_jwt_secret
+      AUTHELIA_SESSION_SECRET_FILE: /run/secrets/authelia_session_secret
+      AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE: /run/secrets/authelia_ldap_password
+      AUTHELIA_STORAGE_MYSQL_PASSWORD_FILE: /run/secrets/authelia_storage_mysql_password
+      AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
+      # AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE: /run/secrets/authelia_notifier_smtp_password
+      AUTHELIA_DUO_API_SECRET_KEY_FILE: /run/secrets/authelia_duo_api_secret_key
     labels:
       traefik.enable: true
       traefik.http.routers.authelia-rtr.rule: Host(`login.$DOMAINNAME`)
       traefik.http.routers.authelia-rtr.entrypoints: websecure
       traefik.http.routers.authelia-rtr.middlewares: chain-authelia@file
-
       traefik.http.routers.authelia-rtr.service: authelia-svc
       traefik.http.services.authelia-svc.loadbalancer.server.port: 9091
-    ports:
-      - "9091:9091"
-    environment:
-      TZ: $TZ
-      AUTHELIA_JWT_SECRET_FILE: /run/secrets/authelia_jwt_secret
-      AUTHELIA_SESSION_SECRET_FILE: /run/secrets/authelia_session_secret
-      AUTHELIA_STORAGE_MYSQL_PASSWORD_FILE: /run/secrets/authelia_storage_mysql_password
-      AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
-      # AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE: /run/secrets/authelia_notifier_smtp_password
-      AUTHELIA_DUO_API_SECRET_KEY_FILE: /run/secrets/authelia_duo_api_secret_key
     secrets:
+      - authelia_storage_encryption_key
       - authelia_jwt_secret
       - authelia_session_secret
-      - mysql_root_password
+      - authelia_ldap_password
       - authelia_storage_mysql_password
       - authelia_storage_redis_password
       # - authelia_notifier_smtp_password
       - authelia_duo_api_secret_key
-    restart: unless-stopped
 
-  # Wireguard Site-to-Site connection
   wireguard-sts:
     image: linuxserver/wireguard:latest
     container_name: wireguard-sts
-    environment:
-      TZ: $TZ
-    volumes:
-      - $APPDATA/wireguard-sts:/config
-    ports:
-      - "61920:51820/udp"
-      - "61921:51821/tcp"
+    restart: unless-stopped
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
     sysctls:
       net.ipv4.ip_forward: 1
       net.ipv4.conf.all.src_valid_mark: 1
-    restart: unless-stopped
+    ports:
+      - "61920:51820/udp"
+      - "61921:51821/tcp"
+    volumes:
+      - $APPDATA/wireguard-sts:/config
+    environment:
+      TZ: $TZ
     networks:
       default:
         ipv4_address: 172.10.0.100
 
-  # Wireguard for connecting from remote devicese
   wg-easy:
     image: weejewel/wg-easy
     container_name: wg-easy
     depends_on: [ unbound, pihole ]
-    environment:
-      WG_HOST: wireguard.$DOMAINNAME
-      PASSWORD: $WGEASY_PASSWORD
-      WG_PORT: 51920
-      WG_DEFAULT_ADDRESS: 10.6.0.x
-      WG_DEFAULT_DNS: 10.10.0.100
-      WG_ALLOWED_IPS: 192.168.10.0/24, 192.168.20.0/24, 10.10.0.0/24
-    volumes:
-      - $APPDATA/wg-easy/:/etc/wireguard
-    ports:
-      - "51920:51820/udp"
-      - "51821:51821/tcp"
+    restart: unless-stopped
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -167,18 +187,65 @@ services:
       net.ipv4.ip_forward: 1
       net.ipv4.conf.all.src_valid_mark: 1
     dns:
-      - 10.10.0.100 # Points to pihole
-      - 10.10.0.200 # Points to unbound
-    restart: unless-stopped
-    networks:
-      vpn:
-        ipv4_address: 10.10.0.4
+      - $VPN_PIHOLE_IP # Points to pihole
+      - $VPN_UNBOUND_IP # Points to unbound
+    ports:
+      - "51920:51820/udp"
+      - "51821:51821/tcp"
+    volumes:
+      - $APPDATA/wg-easy/:/etc/wireguard
+    environment:
+      WG_HOST: wireguard.$DOMAINNAME
+      PASSWORD: $WGEASY_PASSWORD
+      WG_PORT: 51920
+      WG_DEFAULT_ADDRESS: 10.6.0.x
+      WG_DEFAULT_DNS: $VPN_PIHOLE_IP
+      WG_ALLOWED_IPS: 192.168.10.0/24, 192.168.20.0/24, 10.10.0.0/24
     labels:
       traefik.enable: true
-      traefik.udp.routers.wg-easy.entrypoints: wg-easy
-      traefik.udp.routers.wg-easy.service: wg-easy-service
-      traefik.udp.services.wg-easy-service.loadbalancer.server.port: 51920
+      # admin panel
+      traefik.http.routers.wg-easy-rtr.service: wg-easy-svc
+      traefik.http.services.wg-easy-svc.loadbalancer.server.port: 51821
+      traefik.http.routers.wg-easy-rtr.rule: Host(`wg-easy-admin.$DOMAINNAME`)
+      traefik.http.routers.wg-easy-rtr.entrypoints: websecure
+      traefik.http.routers.wg-easy-rtr.middlewares: chain-authelia@file
+      # udp traffic
+      traefik.udp.routers.wg-easy-udp-rtr.entrypoints: wg-easy
+      traefik.udp.routers.wg-easy-udp-rtr.service: wg-easy-udp-svc
+      traefik.udp.services.wg-easy-udp-svc.loadbalancer.server.port: 51920
+    networks:
+      vpn:
+        ipv4_address: $VPN_WG_EASY_IP
 
+  # Traefik Certs Dumper - Extract LetsEncrypt Certificates - Traefik2 Compatible
+  certdumper:
+    image: humenius/traefik-certs-dumper:arm64v8
+    container_name: certdumper
+    depends_on: [ traefik ]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - $APPDATA/traefik2/acme:/acme:ro
+      - $SHARED/certs:/output:rw
+      # - /var/run/docker.sock:/var/run/docker.sock:ro # Only needed if restarting containers
+    environment:
+      ACME_FILE_PATH: /acme/acme2.json
+    network_mode: none
+
+  # DuckDNS - auto update DDNS
+  duckdns:
+    image: lscr.io/linuxserver/duckdns
+    container_name: duckdns
+    environment:
+      - PUID=$PUID #optional
+      - PGID=$PGID
+      - TZ=$TZ
+      - SUBDOMAINS=$DOMAINNAME
+      - TOKEN=$DUCKDNS_TOKEN
+      - LOG_FILE=false
+    volumes:
+      - $APPDATA/duckdns/config:/config
+    restart: unless-stopped
 
   ############################# DATABASES
   # Redis - Key-value Store
@@ -188,19 +255,19 @@ services:
     restart: always
     command: [ "bash", "-c",
                'docker-entrypoint.sh --appendonly yes --requirepass "$$(cat $$AUTHELIA_SESSION_REDIS_PASSWORD_FILE)" --maxmemory 512mb --maxmemory-policy allkeys-lru' ]
-    ports:
-      - "6379:6379"
     security_opt:
       - no-new-privileges:true
-    secrets:
-      - authelia_storage_redis_password
-    environment:
-      TZ: $TZ
-      AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
+    ports:
+      - "6379:6379"
     volumes:
       - $APPDATA/redis/data:/data
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: $TZ
+      AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
+    secrets:
+      - authelia_storage_redis_password
 
   # MariaDB - SQL relational database
   mariadb:
@@ -222,25 +289,82 @@ services:
     image: arm64v8/phpmyadmin:latest
     container_name: phpmyadmin
     restart: unless-stopped
+    depends_on:
+      - mariadb
     ports:
       - "8010:80"
     environment:
       TZ: $TZ
-      # PMA_ARBITRARY: 1
-      PMA_HOST: $SERVER_IP
+      PMA_HOST: mariadb
       PMA_PORT: 3306
       MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
-    secrets:
-      - mysql_root_password
-    depends_on:
-      - mariadb
     labels:
       traefik.enable: true
-      traefik.http.routers.phpmyadmin-rtr.service: phpmyadmin-svc
       traefik.http.services.phpmyadmin-svc.loadbalancer.server.port: 80
+      traefik.http.routers.phpmyadmin-rtr.service: phpmyadmin-svc
       traefik.http.routers.phpmyadmin-rtr.rule: Host(`phpmyadmin.$DOMAINNAME`)
       traefik.http.routers.phpmyadmin-rtr.entrypoints: websecure
       traefik.http.routers.phpmyadmin-rtr.middlewares: chain-authelia@file
+    secrets:
+      - mysql_root_password
+
+  openldap:
+    image: tiredofit/openldap
+    container_name: openldap
+    hostname: ldap.$DOMAINNAME
+    depends_on: [ traefik ]
+    restart: always
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - $APPDATA/openldap/backup:/data/backup
+      - $APPDATA/openldap/data:/var/lib/openldap
+      - $APPDATA/openldap/config:/etc/openldap/slapd.d
+      - $SHARED/certs/*.$DOMAINNAME:/certs
+    environment:
+      TZ: $TZ
+      HOSTNAME: ldap.$DOMAINNAME
+      ORGANIZATION: $LDAP_ORGANIZATION
+      LOG_LEVEL: 256
+      DOMAIN: $LDAP_DOMAIN
+      BASE_DN: $LDAP_BASE_DN
+
+      ADMIN_PASS: $LDAP_ADMIN_PASS
+      CONFIG_PASS: $LDAP_CONFIG_PASS
+      ENABLE_READONLY_USER: false
+      DEBUG_MODE: true
+
+      ENABLE_TLS: true
+      TLS_CA_NAME: ca
+      TLS_CRT_FILENAME: cert.pem
+      TLS_KEY_FILENAME: key.pem
+      TLS_ENFORCE: true
+      TLS_CIPHER_SUITE: ECDHE-RSA-AES256-SHA384:AES256-SHA256:!RC4:HIGH:!MD5:!EDH:!EXP:!SSLV2:!eNULL
+      TLS_VERIFY_CLIENT: try
+      SSL_HELPER_PREFIX: ldap
+
+      ENABLE_BACKUP: false
+      REMOVE_CONFIG_AFTER_SETUP: true
+    labels:
+      traefik.enable: true
+      # LDAP TCP
+      traefik.tcp.routers.ldap-tcp.rule: HostSNI(`ldap.$DOMAINNAME`)
+      traefik.tcp.routers.ldap-tcp.entrypoints: ldap-tcp
+      traefik.tcp.routers.ldap-tcp.service: ldap-tcp-svc
+      traefik.tcp.services.ldap-tcp-svc.loadbalancer.server.port: 389
+      # LDAP UDP
+      traefik.udp.routers.ldap-udp.entrypoints: ldap-udp
+      traefik.udp.routers.ldap-udp.service: ldap-udp-svc
+      traefik.udp.services.ldap-udp-svc.loadbalancer.server.port: 389
+      # LDAPS
+      traefik.tcp.routers.ldaps.rule: HostSNI(`ldap.$DOMAINNAME`)
+      traefik.tcp.routers.ldaps.entrypoints: ldaps
+      traefik.tcp.routers.ldaps.tls: true
+      traefik.tcp.routers.ldaps.tls.passthrough: true
+      traefik.tcp.routers.ldaps.tls.certresolver: letsencrypt
+      traefik.tcp.routers.ldaps.service: ldaps-svc
+      traefik.tcp.services.ldaps-svc.loadbalancer.server.port: 636
 
   influxdb:
     image: influxdb:latest
@@ -260,64 +384,57 @@ services:
       traefik.http.routers.influxdb-rtr.service: influxdb-svc
       traefik.http.routers.influxdb-rtr.middlewares: chain-authelia@file
 
-  # Bitwarden - password manager
   bitwarden:
     image: bitwardenrs/server:latest
     container_name: bitwarden
+    restart: unless-stopped
     ports:
       - "8050:80"
     volumes:
       - $APPDATA/bitwarden:/data
-    labels:
-      traefik.enable: true
-      traefik.http.services.bitwarden.loadbalancer.server.port: 80
-      traefik.http.routers.bitwarden.rule: Host(`bitwarden.$DOMAINNAME`)
-      traefik.http.routers.bitwarden.entrypoints: websecure
-      traefik.http.routers.bitwarden.middlewares: chain-authelia@file
     environment:
       TZ: $TZ
-    restart: unless-stopped
+    labels:
+      traefik.enable: true
+      traefik.http.services.bitwarden-svc.loadbalancer.server.port: 80
+      traefik.http.routers.bitwarden-rtr.service: bitwarden-svc
+      traefik.http.routers.bitwarden-rtr.rule: Host(`bitwarden.$DOMAINNAME`)
+      traefik.http.routers.bitwarden-rtr.entrypoints: websecure
+      traefik.http.routers.bitwarden-rtr.middlewares: chain-authelia@file
 
 
   ############################# DNS SERVERS
   pihole:
     image: pihole/pihole:latest
     container_name: pihole
-    depends_on: [unbound]
+    depends_on: [ unbound ]
     restart: unless-stopped
-    hostname: pihole
-    dns:
-      - 10.10.0.200 # Points to unbound
-      - 9.9.9.9
-    environment:
-      TZ: $TZ
-      WEBPASSWORD: "" # Password - can be changed later
-      ServerIP: $SERVER_IP # Internal IP of pihole
-      DNS1: 10.10.0.200 # Unbound IP
-      DNS2: 10.10.0.200 # If we don't specify two, it will auto pick google.
-      DBINTERVAL: 60
-      MAXDBDAYS: 7
-    # Volumes store your data between container upgrades
-    volumes:
-      - $APPDATA/pihole/pihole/:/etc/pihole/
-      - $APPDATA/pihole/dnsmasq.d/:/etc/dnsmasq.d/
-    # Recommended but not required (DHCP needs NET_ADMIN)
-    #   https://github.com/pi-hole/docker-pi-hole#note-on-capabilities
     cap_add:
       - NET_ADMIN
+    dns:
+      - $VPN_UNBOUND_IP # Points to unbound
+      - 9.9.9.9
     ports:
       - "53:53/tcp"
       - "53:53/udp"
       - "67:67/udp"
-      - "80:80/tcp"
+      - "8090:80/tcp"
+    volumes:
+      - $APPDATA/pihole/pihole/:/etc/pihole/
+      - $APPDATA/pihole/dnsmasq.d/:/etc/dnsmasq.d/
+    environment:
+      TZ: $TZ
+      WEBPASSWORD: "" # Password - can be changed later
+      ServerIP: $SERVER_IP # Internal IP of pihole
+      PIHOLE_DNS_: $VPN_UNBOUND_IP;$VPN_UNBOUND_IP
     networks:
       default:
-        ipv4_address: $PIHOLE_INTERNAL_IP
+        ipv4_address: $INTERNAL_PIHOLE_IP
       vpn:
-        ipv4_address: 10.10.0.100
+        ipv4_address: $VPN_PIHOLE_IP
 
   unbound:
-    image: mvance/unbound-rpi:latest
+    image: mvance/unbound-rpi:1.13.1
     container_name: unbound
     restart: unless-stopped
     volumes:
@@ -326,15 +443,15 @@ services:
       TZ: $TZ
     networks:
       vpn:
-        ipv4_address: 10.10.0.200
+        ipv4_address: $VPN_UNBOUND_IP
 
 
   ############################# CONTAINER MANAGEMENT
   portainer:
     image: portainer/portainer-ce
     container_name: portainer
-    command: -H unix:///var/run/docker.sock
     restart: unless-stopped
+    command: -H unix:///var/run/docker.sock
     ports:
       - "9000:9000"
       - "8000:8000"
@@ -355,9 +472,9 @@ services:
     image: containrrr/watchtower:latest
     container_name: watchtower
     restart: always
+    command: --schedule "0 0 3 * * *" --cleanup
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    command: --schedule "0 0 3 * * *" --cleanup
     environment:
       TZ: $TZ
 
@@ -366,13 +483,14 @@ services:
   homeassistant:
     image: homeassistant/raspberrypi4-homeassistant:stable
     container_name: home-assistant
+    restart: always
+    privileged: true
+    ports:
+      - "8123:8123"
     volumes:
       - $APPDATA/homeassistant:/config
     environment:
       TZ: $TZ
-    restart: always
-    ports:
-      - "8123:8123"
     labels:
       traefik.enable: true
       traefik.http.services.ha-svc.loadbalancer.server.port: 8123
@@ -380,11 +498,11 @@ services:
       traefik.http.routers.ha-rtr.entrypoints: websecure
       traefik.http.routers.ha-rtr.service: ha-svc
       traefik.http.routers.ha-rtr.middlewares: chain-authelia@file
-    privileged: true
 
   mosquitto:
     image: eclipse-mosquitto
     container_name: mosquitto
+    restart: unless-stopped
     ports:
       - "1883:1883"
       - "9001:9001"
@@ -394,11 +512,11 @@ services:
       - $APPDATA/mosquitto/log:/mosquitto/log
     environment:
       TZ: $TZ
-    restart: unless-stopped
 
   tasmoadmin:
     image: raymondmm/tasmoadmin
     container_name: tasmoadmin
+    restart: unless-stopped
     profiles:
       - tasmota
     ports:
@@ -407,11 +525,11 @@ services:
       - $APPDATA/tasmoadmin:/data
     environment:
       TZ: $TZ
-    restart: unless-stopped
 
   tasmobackup:
     image: danmed/tasmobackupv1
     container_name: tasmobackup
+    restart: unless-stopped
     profiles:
       - tasmota
     depends_on:
@@ -424,12 +542,9 @@ services:
       TZ: $TZ
       DBTYPE: mysql
       DBNAME: tasmobackup
-      MYSQL_SERVER: $SERVER_IP
+      MYSQL_SERVER: mariadb
       MYSQL_USERNAME: tasmobackup
       MYSQL_PASSWORD: $MARIADB_TASMOBACKUP_PASSWORD
-#      DBTYPE: sqlite
-#      DBNAME: data/tasmobackup
-    restart: unless-stopped
 
   zwavejs2mqtt:
     container_name: zwavejs2mqtt
@@ -437,31 +552,39 @@ services:
     restart: unless-stopped
     tty: true
     stop_signal: SIGINT
-    environment:
-      TZ: $TZ
     devices:
-      - /dev/ttyACM0:/dev/zwave
-    volumes:
-      - $APPDATA/zwavejs2mqtt/:/usr/src/app/store
+      - /dev/serial/by-id/usb-0658_0200-if00:/dev/zwave
     ports:
       - "8091:8091"
       - "3000:3000"
+    environment:
+      TZ: $TZ
+    volumes:
+      - $APPDATA/zwavejs2mqtt/:/usr/src/app/store
     labels:
       traefik.enable: true
-      traefik.http.services.bitwarden.loadbalancer.server.port: 8091
-      traefik.http.routers.bitwarden.rule: Host(`zwavejs.$DOMAINNAME`)
-      traefik.http.routers.bitwarden.entrypoints: websecure
-      traefik.http.routers.bitwarden.middlewares: chain-authelia@file
+      traefik.http.services.zwavejs-svc.loadbalancer.server.port: 8091
+      traefik.http.routers.zwavejs-rtr.service: zwavejs-svc
+      traefik.http.routers.zwavejs-rtr.rule: Host(`zwavejs.$DOMAINNAME`)
+      traefik.http.routers.zwavejs-rtr.entrypoints: websecure
+      traefik.http.routers.zwavejs-rtr.middlewares: chain-authelia@file
 
-  noisy-mqtt:
-    container_name: noisy-mqtt
-    image: desty2k/noisy-mqtt:latest
-    restart: "no"
+  # private NTP server for Tasmota devices
+  ntp:
+    image: cturra/ntp:latest
+    container_name: ntp
+    restart: always
+    ports:
+      - "123:123/udp"
+    read_only: true
+    tmpfs:
+      - /etc/chrony:rw,mode=1750
+      - /run/chrony:rw,mode=1750
+      - /var/lib/chrony:rw,mode=1750
     environment:
-      HOST: $SERVER_IP
-      USERNAME: $MQTT_USERNAME
-      PASSWORD: $MQTT_PASSWORD
       TZ: $TZ
+      NTP_SERVERS: pl.pool.ntp.org
+      LOG_LEVEL: 0
 
 
   ############################# TELEMETRY AND MONITORING
@@ -469,12 +592,13 @@ services:
     image: telegraf:latest
     container_name: telegraf
     user: telegraf:995
+    restart: unless-stopped
+    devices:
+      - /dev/vchiq
     ports:
       - "8092:8092"
       - "8094:8094"
       - "8125:8125"
-    devices:
-      - /dev/vchiq
     volumes:
       - $APPDATA/telegraf/:/etc/telegraf/
       - /:/hostfs:ro
@@ -489,20 +613,19 @@ services:
       HOST_RUN: /hostfs/run
       HOST_MOUNT_PREFIX: /hostfs
       LD_LIBRARY_PATH: /opt/vc/lib
-    restart: unless-stopped
 
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
     restart: unless-stopped
+    ports:
+      - "4000:3000"
     volumes:
       - $APPDATA/grafana:/var/lib/grafana
     environment:
       GF_SECURITY_ADMIN_PASSWORD: -/B@rtek40/-?
       GF_USERS_ALLOW_SIGN_UP: "false"
       TZ: $TZ
-    ports:
-      - "4000:3000"
     labels:
       traefik.enable: true
       traefik.http.services.grafana-svc.loadbalancer.server.port: 3000
@@ -511,15 +634,32 @@ services:
       traefik.http.routers.grafana-rtr.service: grafana-svc
       traefik.http.routers.grafana-rtr.middlewares: chain-authelia@file
 
+  unifi:
+    image: jacobalberty/unifi
+    container_name: unifi
+    environment:
+      TZ: $TZ
+      PUID: 1000
+      PGID: 1000
+    volumes:
+      - $APPDATA/unifi:/unifi
+    ports:
+      - "3478:3478/udp"
+      - "8080:8080/tcp"
+      - "8443:8443/tcp"
+      - "10001:10001/udp"
+    restart: unless-stopped
+
 
   ############################# WWW SERVICES
   homer:
     image: b4bz/homer:latest
     container_name: homer
+    restart: unless-stopped
+    ports:
+      - "8060:8080"
     volumes:
       - $APPDATA/homer:/www/assets
-    ports:
-      - "8080:8080"
     environment:
       TZ: $TZ
     labels:
@@ -529,13 +669,14 @@ services:
       traefik.http.routers.homer-rtr.rule: Host(`home.$DOMAINNAME`)
       traefik.http.routers.homer-rtr.entrypoints: websecure
       traefik.http.routers.homer-rtr.middlewares: chain-authelia@file
-    restart: unless-stopped
 
   website:
     image: nginx
     container_name: nginx
     profiles:
       - website
+    ports:
+      - "80:80"
     volumes:
       - $APPDATA/nginx/templates:/etc/nginx/templates
       - $APPDATA/nginx/www/blog/_site/:/usr/share/nginx/html/
@@ -546,24 +687,23 @@ services:
     labels:
       traefik.enable: true
       traefik.http.services.nginx-svc.loadbalancer.server.port: 80
+      traefik.http.routers.nginx-rtr.service: nginx-svc
       traefik.http.routers.nginx-rtr.rule: Host(`$DOMAINNAME`)
       traefik.http.routers.nginx-rtr.entrypoints: websecure
-      traefik.http.routers.nginx-rtr.service: nginx-svc
       traefik.http.routers.grafana-rtr.middlewares: chain-no-auth@file
-    ports:
-      - "80:80"
 
   whoami:
     image: traefik/whoami
     container_name: whoami
-    labels:
-      traefik.enable: true
-      traefik.http.routers.whoami-rtr.entrypoints: websecure
-      traefik.http.routers.whoami-rtr.rule: Host(`whoami.$DOMAINNAME`)
-      traefik.http.services.whoami-svc.loadbalancer.server.port: 80
-      traefik.http.routers.phpmyadmin-rtr.middlewares: chain-authelia@file
+    restart: unless-stopped
     ports:
       - "9010:80"
     environment:
       TZ: $TZ
-    restart: unless-stopped
+    labels:
+      traefik.enable: true
+      traefik.http.services.whoami-svc.loadbalancer.server.port: 80
+      traefik.http.routers.whoami-rtr.service: whoami-svc
+      traefik.http.routers.whoami-rtr.entrypoints: websecure
+      traefik.http.routers.whoami-rtr.rule: Host(`whoami.$DOMAINNAME`)
+      traefik.http.routers.whoami-rtr.middlewares: chain-authelia@file
