@@ -2,8 +2,6 @@
 #                   Authelia configuration                    #
 ###############################################################
 
-# All secrets are loaded from files
-
 server:
   host: 0.0.0.0
   port: 9091
@@ -11,7 +9,6 @@ server:
 log:
   level: debug
 
-# Landing page
 # https://docs.authelia.com/configuration/miscellaneous.html#default-redirection-url
 default_redirection_url: https://home.example.com
 
@@ -26,16 +23,37 @@ duo_api:
 
 
 authentication_backend:
-  file:
-    path: /config/users_database.yml
-    # customize passwords based on https://docs.authelia.com/configuration/authentication/file.html
-    password:
-      algorithm: sha512
-      iterations: 1
-      key_length: 32
-      salt_length: 16
-      memory: 1024
-      parallelism: 8
+  ldap:
+    implementation: custom
+    url: ldaps://ldap.example.com
+    timeout: 5s
+    start_tls: false
+    tls:
+      server_name: ldap.example.com
+      skip_verify: false
+      minimum_version: TLS1.3
+    base_dn: DC=example,DC=com
+    username_attribute: uid
+    additional_users_dn: ou=users
+    users_filter: (&({username_attribute}={input})(objectClass=inetOrgPerson))
+    additional_groups_dn: ou=groups
+    groups_filter: (&(memberUid={input})(objectClass=posixGroup))
+    group_name_attribute: cn
+    mail_attribute: mail
+    display_name_attribute: displayName
+    user: CN=admin,DC=example,DC=com
+    password: EXAMPLE_PASSWORD
+
+#  file:
+#    path: /config/users_database.yml
+#    # customize passwords based on https://docs.authelia.com/configuration/authentication/file.html
+#    password:
+#      algorithm: sha512
+#      iterations: 1
+#      key_length: 32
+#      salt_length: 16
+#      memory: 1024
+#      parallelism: 8
 
 # https://docs.authelia.com/configuration/access-control.html
 access_control:
@@ -56,11 +74,9 @@ access_control:
         - VPN
       policy: bypass
 
-    # Login page
     - domain: "login.example.com"
       policy: bypass
 
-    # Mobile app
     - domain: "homeassistant.example.com"
       policy: bypass
       resources:
@@ -72,22 +88,6 @@ access_control:
         - "^/local.*"
         - "^/hacsfiles.*"
         - "^/frontend_latest.*"
-
-    # Browser plugin + mobile app access
-    - domain: "bitwarden.example.com"
-      resources:
-        - "^/api.*$"
-        - "^/identity.*$"
-        - "^/icons.*$"
-        - "^/notifications.*$"
-      policy: bypass
-
-    # Normal users have access to two subdomains: home. and homeassistant.
-    # Admins have access to all subdomains
-    - domain: "home.example.com"
-      policy: two_factor
-      subject:
-        - "group:users"
 
     - domain: "homeassistant.example.com"
       policy: two_factor
@@ -101,13 +101,11 @@ access_control:
 
 session:
   name: authelia_session
-  # This secret can also be set using the env variables AUTHELIA_SESSION_SECRET_FILE
-  # Used a different secret, but the same site as jwt_secret above.
-  # secret: SECRET_GOES_HERE # use docker secret file instead AUTHELIA_SESSION_SECRET_FILE
   expiration: 3600 # 1 hour
   inactivity: 300 # 5 minutes
   domain: example.com # Should match whatever your root protected domain is
 
+# Optional. Can improve performance on a busy system. If not enabled, session info is stored in memory.
   redis:
     host: redis
     port: 6379
@@ -119,24 +117,13 @@ regulation:
 
 storage:
   mysql:
-    # MariaDB database. Create database "authelia" before starting Authelia container!!!
-    # It is recommended not to use root account
-    host: <SERVER_IP>
+  # MySQL allows running multiple authelia instances. Create database and enter details below.
+    host: mariadb
     port: 3306
     database: authelia
     username: authelia
 
-# For testing purpose, notifications can be sent in a file.
+
 notifier:
   filesystem:
     filename: /config/notification.txt
-
-#  smtp:
-#    username: SMTP_USERNAME
-#    # This secret can also be set using the env variables AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE
-#    # password: # use docker secret file instead AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE
-#    host: SMTP_HOST
-#    port: 587 #465
-#    sender: SENDER_EMAIL
-
-

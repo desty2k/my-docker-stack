@@ -1,4 +1,6 @@
 secrets:
+  authelia_storage_encryption_key:
+    file: $SECRETS/authelia_storage_encryption_key
   authelia_jwt_secret:
     file: $SECRETS/authelia_jwt_secret
   authelia_session_secret:
@@ -7,6 +9,8 @@ secrets:
     file: $SECRETS/authelia_storage_mysql_password
   authelia_storage_redis_password:
     file: $SECRETS/authelia_storage_redis_password
+  authelia_ldap_password:
+    file: $SECRETS/authelia_ldap_password
 #  authelia_notifier_smtp_password:
 #    file: $SECRETS/authelia_notifier_smtp_password
   authelia_duo_api_secret_key:
@@ -29,13 +33,13 @@ networks:
       config:
         - subnet: 172.20.0.0/16
           gateway: 172.20.0.1
-
   vpn:
     name: vpn
     driver: bridge
     ipam:
       config:
         - subnet: 10.20.0.0/24
+          gateway: 10.20.0.1
 
 services:
   ############################# EXPOSING SERVICES / CONNECTION
@@ -89,12 +93,11 @@ services:
       TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_MAIN: $DOMAINNAME
       TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_SANS: "*.$DOMAINNAME"
     ports:
-      - "80:80"
       - "443:443"
       - "8080:8080"
     networks:
       default:
-        ipv4_address: 172.20.0.200
+        ipv4_address: $INTERNAL_TRAEFIK_IP
     labels:
       traefik.enable: true
       traefik.http.services.traefik-svc.loadbalancer.server.port: 8080
@@ -118,18 +121,22 @@ services:
     ports:
       - "9091:9091"
     secrets:
+      - authelia_storage_encryption_key
       - authelia_jwt_secret
       - authelia_session_secret
-      - mysql_root_password
+      - authelia_storage_mysql_password
       - authelia_storage_redis_password
+      - authelia_ldap_password
       # - authelia_notifier_smtp_password
       - authelia_duo_api_secret_key
     environment:
       TZ: $TZ
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/authelia_storage_encryption_key
       AUTHELIA_JWT_SECRET_FILE: /run/secrets/authelia_jwt_secret
       AUTHELIA_SESSION_SECRET_FILE: /run/secrets/authelia_session_secret
-      AUTHELIA_STORAGE_MYSQL_PASSWORD_FILE: /run/secrets/mysql_root_password
+      AUTHELIA_STORAGE_MYSQL_PASSWORD_FILE: /run/secrets/authelia_storage_mysql_password
       AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
+      AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE: /run/secrets/authelia_ldap_password
       # AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE: /run/secrets/authelia_notifier_smtp_password
       AUTHELIA_DUO_API_SECRET_KEY_FILE: /run/secrets/authelia_duo_api_secret_key
     restart: unless-stopped
@@ -163,8 +170,8 @@ services:
       PASSWORD: ""
       WG_PORT: 51920
       WG_DEFAULT_ADDRESS: 10.6.0.x
-      WG_DEFAULT_DNS: 10.20.0.100
-      WG_ALLOWED_IPS: 192.168.10.0/24, 192.168.20.0/24, 10.20.0.0/24
+      WG_DEFAULT_DNS: $VPN_PIHOLE_IP
+      WG_ALLOWED_IPS: 0.0.0.0/0
     volumes:
       - $APPDATA/wg-easy/:/etc/wireguard
     ports:
@@ -177,18 +184,25 @@ services:
       net.ipv4.ip_forward: 1
       net.ipv4.conf.all.src_valid_mark: 1
     dns:
-      - 10.20.0.100 # Points to adguard
-      - 10.20.0.200 # Points to unbound
+      - $VPN_PIHOLE_IP # Points to adguard
+      - $VPN_UNBOUND_IP # Points to unbound
     restart: unless-stopped
     labels:
       traefik.enable: true
+      # admin panel
+      traefik.http.routers.wg-easy-rtr.service: wg-easy-svc
+      traefik.http.services.wg-easy-svc.loadbalancer.server.port: 51821
+      traefik.http.routers.wg-easy-rtr.rule: Host(`wg-easy-admin.$DOMAINNAME`)
+      traefik.http.routers.wg-easy-rtr.entrypoints: websecure
+      traefik.http.routers.wg-easy-rtr.middlewares: chain-authelia@file
+      # udp traffic
       traefik.udp.routers.wg-easy-rtr.entrypoints: wg-easy
       traefik.udp.routers.wg-easy-rtr.service: wg-easy-svc
       traefik.udp.services.wg-easy-svc.loadbalancer.server.port: 51920
       com.centurylinklabs.watchtower.enable: false
     networks:
       vpn:
-        ipv4_address: 10.20.0.50
+        ipv4_address: $VPN_WG_EASY_IP
 
   ############################# DATABASES
   # Redis - Key-value Store
@@ -279,13 +293,13 @@ services:
       traefik.http.routers.adguard-rtr.entrypoints: websecure
       traefik.http.routers.adguard-rtr.middlewares: chain-authelia@file
     dns:
-      - 10.20.0.200 # Points to unbound
+      - $VPN_UNBOUND_IP # Points to unbound
       - 9.9.9.9
     networks:
       default:
-        ipv4_address: $ADGUARD_INTERNAL_IP
+        ipv4_address: $INTERNAL_ADGUARD_IP
       vpn:
-        ipv4_address: 10.20.0.100
+        ipv4_address: $VPN_PIHOLE_IP
 
   # If we want to use AdGuard/Pi-Hole as DHCP server in bridge mode,
   # we have to forward all DHCP requests from internal Docker network
@@ -295,7 +309,7 @@ services:
     container_name: dhcphelper
     restart: unless-stopped
     environment:
-      IP: $ADGUARD_INTERNAL_IP
+      IP: $INTERNAL_ADGUARD_IP
       TZ: $TZ
     depends_on:
       - adguard
@@ -307,13 +321,17 @@ services:
     image: mvance/unbound-rpi:1.13.1
     container_name: unbound
     restart: unless-stopped
+    ports:
+      - "8953:8953"
     volumes:
       - $APPDATA/unbound:/opt/unbound/etc/unbound/
     environment:
       TZ: $TZ
     networks:
+      default:
+        ipv4_address: $INTERNAL_UNBOUND_IP
       vpn:
-        ipv4_address: 10.20.0.200
+        ipv4_address: $VPN_UNBOUND_IP
 
 
   ############################# CONTAINER MANAGEMENT
@@ -348,6 +366,11 @@ services:
       - $APPDATA/homeassistant:/config
     environment:
       TZ: $TZ
+      TRAEFIK_IP: $INTERNAL_TRAEFIK_IP
+      INFLUXDB_URL: $INFLUXDB_URL
+      INFLUXDB_ORGANIZATION: $INFLUXDB_ORGANIZATION
+      INFLUXDB_BUCKET: $INFLUXDB_HOMEASSISTANT_BUCKET
+      INFLUXDB_TOKEN: $INFLUXDB_HOMEASSISTANT_TOKEN
     restart: always
     ports:
       - "8123:8123"
@@ -374,6 +397,52 @@ services:
       TZ: $TZ
     restart: unless-stopped
 
+  zigbee2mqtt:
+    container_name: zigbee2mqtt
+    restart: unless-stopped
+    image: koenkk/zigbee2mqtt
+    volumes:
+      - $APPDATA/zigbee2mqtt:/app/data
+      - /run/udev:/run/udev:ro
+    devices:
+      - /dev/ttyUSB0:/dev/ttyACM0
+    ports:
+      - 8090:8080
+    environment:
+      TZ: $TZ
+
+
+  ############################# Telemetry
+  # Telegraf
+  telegraf:
+    image: telegraf:latest
+    container_name: telegraf
+    user: telegraf:995
+    ports:
+      - "8092:8092"
+      - "8094:8094"
+      - "8125:8125"
+    devices:
+      - /dev/vchiq
+    volumes:
+      - $APPDATA/telegraf/:/etc/telegraf/
+      - /:/hostfs:ro
+      - /opt/vc:/opt/vc
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      TZ: $TZ
+      HOST_ETC: /hostfs/etc
+      HOST_PROC: /hostfs/proc
+      HOST_SYS: /hostfs/sys
+      HOST_VAR: /hostfs/var
+      HOST_RUN: /hostfs/run
+      HOST_MOUNT_PREFIX: /hostfs
+      LD_LIBRARY_PATH: /opt/vc/lib
+      INFLUXDB_URL: $INFLUXDB_URL
+      INFLUXDB_ORGANIZATION: $INFLUXDB_ORGANIZATION
+      INFLUXDB_BUCKET: $INFLUXDB_TELEGRAF_BUCKET
+      INFLUXDB_TOKEN: $INFLUXDB_TELEGRAF_TOKEN
+    restart: unless-stopped
 
   ############################# MAINTENANCE
   # DuckDNS - auto update DDNS
