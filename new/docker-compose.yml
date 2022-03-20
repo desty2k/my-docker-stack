@@ -1,0 +1,52 @@
+secrets:
+
+  authelia_storage_encryption_key:
+    file: $SECRETS/authelia_storage_encryption_key
+  authelia_jwt_secret:
+    file: $SECRETS/authelia_jwt_secret
+  authelia_session_secret:
+    file: $SECRETS/authelia_session_secret
+  authelia_ldap_password:
+    file: $SECRETS/authelia_ldap_password
+  authelia_storage_mysql_password:
+    file: $SECRETS/authelia_storage_mysql_password
+  authelia_storage_redis_password:
+    file: $SECRETS/authelia_storage_redis_password
+  authelia_duo_api_secret_key:
+    file: $SECRETS/authelia_duo_api_secret_key
+  traefik_pilot_token:
+    file: $SECRETS/traefik_pilot_token
+  mysql_root_password:
+    file: $SECRETS/mysql_root_password
+  my_email:
+    file: $SECRETS/my_email
+  duckdns_token:
+    file: $SECRETS/duckdns_token
+
+  # /////////////////////////////////////// NEWENWENWENW
+  redis_password:
+    file: $SECRETS/redis_password
+  postgres_initdb_args:
+    file: $SECRETS/postgres_initdb_args
+  postgres_db:
+    file: $SECRETS/postgres_db
+  postgres_user:
+    file: $SECRETS/postgres_user
+  postgres_password:
+    file: $SECRETS/postgres_password
+
+# After changing network settings use 'docker compose up -d --force-recreate' to avoid `network ... not found` errors.
+networks:
+  default:
+    name: internal
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.10.0.0/16
+          gateway: 172.10.0.1
+  vpn:
+    name: vpn
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24

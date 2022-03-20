@@ -1,0 +1,92 @@
+  ############################# SMART HOME
+
+services:
+  homeassistant:
+    image: homeassistant/raspberrypi4-homeassistant:stable
+    container_name: home-assistant
+    restart: always
+    privileged: true
+    ports:
+      - "8123:8123"
+    volumes:
+      - $APPDATA/homeassistant:/config
+    environment:
+      TZ: $TZ
+    labels:
+      traefik.enable: true
+      traefik.http.services.ha-svc.loadbalancer.server.port: 8123
+      traefik.http.routers.ha-rtr.rule: Host(`homeassistant.$DOMAINNAME`)
+      traefik.http.routers.ha-rtr.entrypoints: websecure
+      traefik.http.routers.ha-rtr.service: ha-svc
+      traefik.http.routers.ha-rtr.middlewares: chain-authentik@file
+
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - $APPDATA/mosquitto/config:/mosquitto/config
+      - $APPDATA/mosquitto/data:/mosquitto/data
+      - $APPDATA/mosquitto/log:/mosquitto/log
+    environment:
+      TZ: $TZ
+
+  tasmoadmin:
+    image: raymondmm/tasmoadmin
+    container_name: tasmoadmin
+    restart: unless-stopped
+    profiles:
+      - tasmota
+    ports:
+      - "8020:80"
+    volumes:
+      - $APPDATA/tasmoadmin:/data
+    environment:
+      TZ: $TZ
+
+  tasmobackup:
+    image: danmed/tasmobackupv1
+    container_name: tasmobackup
+    restart: unless-stopped
+    profiles:
+      - tasmota
+    depends_on:
+      - mariadb
+    ports:
+      - "8030:80"
+    volumes:
+      - $APPDATA/tasmobackup:/var/www/html/data
+    environment:
+      TZ: $TZ
+      DBTYPE: mysql
+      DBNAME: tasmobackup
+      MYSQL_SERVER: mariadb
+      MYSQL_USERNAME: tasmobackup
+      MYSQL_PASSWORD: $MARIADB_TASMOBACKUP_PASSWORD
+
+  zwavejs2mqtt:
+    container_name: zwavejs2mqtt
+    image: zwavejs/zwavejs2mqtt:latest
+    restart: unless-stopped
+    tty: true
+    stop_signal: SIGINT
+    devices:
+      - /dev/serial/by-id/usb-0658_0200-if00:/dev/zwave
+    ports:
+      - "8091:8091"
+      - "3000:3000"
+    environment:
+      TZ: $TZ
+    volumes:
+      - $APPDATA/zwavejs2mqtt/:/usr/src/app/store
+    labels:
+      traefik.enable: true
+      traefik.http.services.zwavejs-svc.loadbalancer.server.port: 8091
+      traefik.http.routers.zwavejs-rtr.service: zwavejs-svc
+      traefik.http.routers.zwavejs-rtr.rule: Host(`zwavejs.$DOMAINNAME`)
+      traefik.http.routers.zwavejs-rtr.entrypoints: websecure
+      traefik.http.routers.zwavejs-rtr.middlewares: chain-authentik@file
+

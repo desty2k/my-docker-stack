@@ -1,0 +1,66 @@
+
+services:
+  homer:
+    image: b4bz/homer:latest
+    container_name: homer
+    restart: unless-stopped
+    ports:
+      - "8060:8080"
+    volumes:
+      - $APPDATA/homer:/www/assets
+    environment:
+      TZ: $TZ
+    labels:
+      traefik.enable: true
+      traefik.http.services.homer-svc.loadbalancer.server.port: 8080
+      traefik.http.routers.homer-rtr.service: homer-svc
+      traefik.http.routers.homer-rtr.rule: Host(`home.$DOMAINNAME`)
+      traefik.http.routers.homer-rtr.entrypoints: websecure
+      traefik.http.routers.homer-rtr.middlewares: chain-authentik@file
+
+  website:
+    image: nginx
+    container_name: nginx
+    profiles:
+      - website
+    ports:
+      - "80:80"
+    volumes:
+      - $APPDATA/nginx/templates:/etc/nginx/templates
+      - $APPDATA/nginx/www/blog/_site/:/usr/share/nginx/html/
+    environment:
+      NGINX_HOST: $DOMAINNAME
+      NGINX_PORT: 80
+      TZ: $TZ
+    labels:
+      traefik.enable: true
+      traefik.http.services.nginx-svc.loadbalancer.server.port: 80
+      traefik.http.routers.nginx-rtr.service: nginx-svc
+      traefik.http.routers.nginx-rtr.rule: Host(`$DOMAINNAME`)
+      traefik.http.routers.nginx-rtr.entrypoints: websecure
+      traefik.http.routers.grafana-rtr.middlewares: chain-no-auth@file
+
+  whoami:
+    image: traefik/whoami
+    container_name: whoami
+    restart: unless-stopped
+    ports:
+      - "9010:80"
+    environment:
+      TZ: $TZ
+    labels:
+      traefik.enable: true
+      traefik.http.services.whoami-svc.loadbalancer.server.port: 80
+      traefik.http.routers.whoami-rtr.service: whoami-svc
+      traefik.http.routers.whoami-rtr.entrypoints: websecure
+      traefik.http.routers.whoami-rtr.rule: Host(`whoami.$DOMAINNAME`)
+      traefik.http.routers.whoami-rtr.middlewares: chain-authentik@file
+
+  geoipupdate:
+    image: "maxmindinc/geoipupdate:latest"
+    volumes:
+      - $SHARED/geoip:/usr/share/GeoIP
+    environment:
+      GEOIPUPDATE_EDITION_IDS: "GeoLite2-City"
+      GEOIPUPDATE_FREQUENCY: "8"
+

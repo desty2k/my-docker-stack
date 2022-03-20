@@ -1,0 +1,165 @@
+
+services:
+  postgresql:
+    image: postgres:latest
+    container_name: postgresql
+    restart: unless-stopped
+    volumes:
+      - $APPDATA/postgresl/data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_INITDB_ARGS_FILE: /run/secrets/postgres_initdb_args
+      POSTGRES_DB_FILE: /run/secrets/postgres_db
+      POSTGRES_USER_FILE: /run/secrets/postgres_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_initdb_args
+      - postgres_db
+      - postgres_user
+      - postgres_password
+      - authelia_storage_redis_password
+
+  # Redis - Key-value Store
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    command: [ "bash", "-c",
+               'docker-entrypoint.sh --appendonly yes --requirepass "$$(cat $$AUTHELIA_SESSION_REDIS_PASSWORD_FILE)" --maxmemory 512mb --maxmemory-policy allkeys-lru' ]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "6379:6379"
+    volumes:
+      - $APPDATA/redis/data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: $TZ
+      AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
+    secrets:
+      - authelia_storage_redis_password
+
+  # MariaDB - SQL relational database
+  mariadb:
+    image: linuxserver/mariadb:latest
+    container_name: mariadb
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    volumes:
+      - $APPDATA/mariadb/config:/config
+      - $APPDATA/mariadb/mysql:/var/lib/mysql
+    environment:
+      TZ: $TZ
+      FILE__MYSQL_ROOT_PASSWORD: /run/secrets/mysql_root_password  # Note FILE__ (double underscore)
+    secrets:
+      - mysql_root_password
+
+  phpmyadmin:
+    image: arm64v8/phpmyadmin:latest
+    container_name: phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      - mariadb
+    ports:
+      - "8010:80"
+    environment:
+      TZ: $TZ
+      PMA_HOST: mariadb
+      PMA_PORT: 3306
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+    labels:
+      traefik.enable: true
+      traefik.http.services.phpmyadmin-svc.loadbalancer.server.port: 80
+      traefik.http.routers.phpmyadmin-rtr.service: phpmyadmin-svc
+      traefik.http.routers.phpmyadmin-rtr.rule: Host(`phpmyadmin.$DOMAINNAME`)
+      traefik.http.routers.phpmyadmin-rtr.entrypoints: websecure
+      traefik.http.routers.phpmyadmin-rtr.middlewares: chain-authentik@file
+    secrets:
+      - mysql_root_password
+
+  openldap:
+    image: tiredofit/openldap
+    container_name: openldap
+    hostname: ldap.$DOMAINNAME
+    depends_on: [ traefik ]
+    restart: always
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - $APPDATA/openldap/backup:/data/backup
+      - $APPDATA/openldap/data:/var/lib/openldap
+      - $APPDATA/openldap/config:/etc/openldap/slapd.d
+      - $SHARED/certs/*.$DOMAINNAME:/certs
+    environment:
+      TZ: $TZ
+      HOSTNAME: ldap.$DOMAINNAME
+      ORGANIZATION: $LDAP_ORGANIZATION
+      LOG_LEVEL: 256
+      DOMAIN: $LDAP_DOMAIN
+      BASE_DN: $LDAP_BASE_DN
+
+      ADMIN_PASS: $LDAP_ADMIN_PASS
+      CONFIG_PASS: $LDAP_CONFIG_PASS
+      ENABLE_READONLY_USER: false
+      DEBUG_MODE: true
+
+      ENABLE_TLS: true
+      TLS_CA_NAME: ca
+      TLS_CRT_FILENAME: cert.pem
+      TLS_KEY_FILENAME: key.pem
+      TLS_ENFORCE: true
+      TLS_CIPHER_SUITE: ECDHE-RSA-AES256-SHA384:AES256-SHA256:!RC4:HIGH:!MD5:!EDH:!EXP:!SSLV2:!eNULL
+      TLS_VERIFY_CLIENT: try
+      SSL_HELPER_PREFIX: ldap
+
+      ENABLE_BACKUP: false
+      REMOVE_CONFIG_AFTER_SETUP: true
+    labels:
+      traefik.enable: true
+      # LDAPS
+      traefik.tcp.routers.ldaps.rule: HostSNI(`ldap.$DOMAINNAME`)
+      traefik.tcp.routers.ldaps.entrypoints: ldaps
+      traefik.tcp.routers.ldaps.tls: true
+      traefik.tcp.routers.ldaps.tls.passthrough: true
+      traefik.tcp.routers.ldaps.tls.certresolver: duckdns
+      traefik.tcp.routers.ldaps.service: ldaps-svc
+      traefik.tcp.services.ldaps-svc.loadbalancer.server.port: 636
+
+  influxdb:
+    image: influxdb:latest
+    container_name: influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    volumes:
+      - $APPDATA/influxdb/:/root/.influxdbv2
+    environment:
+      TZ: $TZ
+    labels:
+      traefik.enable: true
+      traefik.http.services.influxdb-svc.loadbalancer.server.port: 8086
+      traefik.http.routers.influxdb-rtr.rule: Host(`influxdb.$DOMAINNAME`)
+      traefik.http.routers.influxdb-rtr.entrypoints: websecure
+      traefik.http.routers.influxdb-rtr.service: influxdb-svc
+      traefik.http.routers.influxdb-rtr.middlewares: chain-authentik@file
+
+  bitwarden:
+    image: vaultwarden/server:latest
+    container_name: bitwarden
+    restart: unless-stopped
+    ports:
+      - "8050:80"
+    volumes:
+      - $APPDATA/bitwarden:/data
+    environment:
+      TZ: $TZ
+    labels:
+      traefik.enable: true
+      traefik.http.services.bitwarden-svc.loadbalancer.server.port: 80
+      traefik.http.routers.bitwarden-rtr.service: bitwarden-svc
+      traefik.http.routers.bitwarden-rtr.rule: Host(`bitwarden.$DOMAINNAME`)
+      traefik.http.routers.bitwarden-rtr.entrypoints: websecure
+      traefik.http.routers.bitwarden-rtr.middlewares: chain-authentik@file
+

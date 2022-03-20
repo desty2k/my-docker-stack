@@ -1,0 +1,6 @@
+
+docker compose -f docker-compose.yml -f ./stack/docker-compose.databases.yml \
+    -f ./stacks/docker-compose.proxy.yml -f ./stacks/docker-compose.network.yml \
+    -f ./stacks/docker-compose.monitoring.yml -f ./stacks/docker-compose.management.yml \
+    -f ./stacks/docker-compose.smarthome.yml -f ./stacks/docker-compose.misc.yml -d
+

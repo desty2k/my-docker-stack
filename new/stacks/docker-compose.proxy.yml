@@ -1,0 +1,192 @@
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8070:8080"
+    volumes:
+      - $APPDATA/traefik2/rules:/rules
+      - $APPDATA/traefik2/acme:/acme
+      - $APPDATA/traefik2/logs:/logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      TZ: $TZ
+      DUCKDNS_TOKEN_FILE: /run/secrets/duckdns_token
+      # https://doc.traefik.io/traefik/reference/static-configuration/env/
+      TRAEFIK_PILOT_TOKEN: $TRAEFIK_PILOT_TOKEN
+      TRAEFIK_LOG_LEVEL: INFO
+      TRAEFIK_ACCESSLOG: true
+      TRAEFIK_ACCESSLOG_BUFFERINGSIZE: 100
+      TRAEFIK_ACCESSLOG_FILEPATH: /logs/traefik.log
+      TRAEFIK_API: true
+      TRAEFIK_API_INSECURE: true
+      TRAEFIK_API_DASHBOARD: true
+
+      TRAEFIK_PROVIDERS_DOCKER: true
+      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: false
+      TRAEFIK_PROVIDERS_FILE_DIRECTORY: /rules
+
+      TRAEFIK_CERTIFICATESRESOLVERS_letsencrypt: true
+      TRAEFIK_CERTIFICATESRESOLVERS_letsencrypt_ACME_EMAIL: $MY_EMAIL
+      TRAEFIK_CERTIFICATESRESOLVERS_letsencrypt_ACME_STORAGE: /acme/acme.json
+      TRAEFIK_CERTIFICATESRESOLVERS_letsencrypt_ACME_TLSCHALLENGE: true
+
+      TRAEFIK_ENTRYPOINTS_web: true
+      TRAEFIK_ENTRYPOINTS_web_ADDRESS: :80
+      TRAEFIK_ENTRYPOINTS_web_HTTP_REDIRECTIONS_ENTRYPOINT_TO: websecure
+
+      TRAEFIK_ENTRYPOINTS_websecure: true
+      TRAEFIK_ENTRYPOINTS_websecure_ADDRESS: :443
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS: true
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_CERTRESOLVER: duckdns
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_MAIN: $DOMAINNAME
+      TRAEFIK_ENTRYPOINTS_websecure_HTTP_TLS_DOMAINS_0_SANS: "*.$DOMAINNAME"
+
+      TRAEFIK_ENTRYPOINTS_ldaps: true
+      TRAEFIK_ENTRYPOINTS_ldaps_ADDRESS: :636/tcp
+
+      TRAEFIK_ENTRYPOINTS_wg-easy: true
+      TRAEFIK_ENTRYPOINTS_wg-easy_ADDRESS: :51920/udp
+    labels:
+      traefik.enable: true
+      traefik.http.services.traefik-svc.loadbalancer.server.port: 8080
+      traefik.http.routers.traefik-rtr.service: traefik-svc
+      traefik.http.routers.traefik-rtr.rule: Host(`traefik.$DOMAINNAME`)
+      traefik.http.routers.traefik-rtr.entrypoints: websecure
+      traefik.http.routers.traefik-rtr.middlewares: chain-authentik@file
+    networks:
+      default:
+        ipv4_address: $INTERNAL_TRAEFIK_IP
+    secrets:
+      - duckdns_token
+
+  authentik_server:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-server
+    restart: unless-stopped
+    command: server
+    environment:
+      TZ: $TZ
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_REDIS__PASSWORD: file:///run/secrets/redis_password
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__NAME: file:///run/secrets/postgres_db
+      AUTHENTIK_POSTGRESQL__USER: file:///run/secrets/postgres_user
+      AUTHENTIK_POSTGRESQL__PASSWORD: file:///run/secrets/postgres_password
+      # AUTHENTIK_ERROR_REPORTING__ENABLED: "true"
+      # WORKERS: 2
+    volumes:
+      - $APPDATA/authentik/media:/media
+      - $APPDATA/authentik/templates:/templates
+      - $SHARED/geoip/:/geoip
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    labels:
+      traefik.enable: true
+      traefik.http.routers.authentik-rtr.rule: Host(`login.$DOMAINNAME`)
+      traefik.http.routers.authentik-rtr.entrypoints: websecure
+      traefik.http.routers.authentik-rtr.middlewares: chain-authentik@file
+      traefik.http.routers.authentik-rtr.service: authentik-svc
+      traefik.http.services.authentik-svc.loadbalancer.server.port: 9000
+    secrets:
+      - redis_password
+      - postgres_db
+      - postgres_user
+      - postgres_password
+
+  authentik_worker:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      TZ: $TZ
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_REDIS__PASSWORD: file:///run/secrets/redis_password
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__NAME: file:///run/secrets/postgres_db
+      AUTHENTIK_POSTGRESQL__USER: file:///run/secrets/postgres_user
+      AUTHENTIK_POSTGRESQL__PASSWORD: file:///run/secrets/postgres_password
+      # AUTHENTIK_ERROR_REPORTING__ENABLED: "true"
+    # This is optional, and can be removed. If you remove this, the following will happen
+    # - The permissions for the /media folders aren't fixed, so make sure they are 1000:1000
+    # - The docker socket can't be accessed anymore
+    user: root
+    volumes:
+      - $APPDATA/authentik/media:/media
+      - $APPDATA/authentik/templates:/templates
+      - $SHARED/geoip:/geoip
+      - $SHARED/certs:/certs
+      - /var/run/docker.sock:/var/run/docker.sock
+    secrets:
+      - redis_password
+      - postgres_db
+      - postgres_user
+      - postgres_password
+
+#  authelia:
+#    image: authelia/authelia
+#    container_name: authelia
+#    restart: unless-stopped
+#    ports:
+#      - "9091:9091"
+#    volumes:
+#      - $APPDATA/authelia:/config
+#    environment:
+#      TZ: $TZ
+#      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/authelia_storage_encryption_key
+#      AUTHELIA_JWT_SECRET_FILE: /run/secrets/authelia_jwt_secret
+#      AUTHELIA_SESSION_SECRET_FILE: /run/secrets/authelia_session_secret
+#      AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE: /run/secrets/authelia_ldap_password
+#      AUTHELIA_STORAGE_MYSQL_PASSWORD_FILE: /run/secrets/authelia_storage_mysql_password
+#      AUTHELIA_SESSION_REDIS_PASSWORD_FILE: /run/secrets/authelia_storage_redis_password
+#      AUTHELIA_DUO_API_SECRET_KEY_FILE: /run/secrets/authelia_duo_api_secret_key
+#    labels:
+#      traefik.enable: true
+#      traefik.http.routers.authelia-rtr.rule: Host(`login.$DOMAINNAME`)
+#      traefik.http.routers.authelia-rtr.entrypoints: websecure
+#      traefik.http.routers.authelia-rtr.middlewares: chain-authentik@file
+#      traefik.http.routers.authelia-rtr.service: authelia-svc
+#      traefik.http.services.authelia-svc.loadbalancer.server.port: 9091
+#    secrets:
+#      - authelia_storage_encryption_key
+#      - authelia_jwt_secret
+#      - authelia_session_secret
+#      - authelia_ldap_password
+#      - authelia_storage_mysql_password
+#      - authelia_storage_redis_password
+#      - authelia_duo_api_secret_key
+
+  # Traefik Certs Dumper - Extract LetsEncrypt Certificates - Traefik2 Compatible
+  certdumper:
+    image: humenius/traefik-certs-dumper:arm64v8
+    container_name: certdumper
+    depends_on: [ traefik ]
+    command: --restart-containers openldap
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - $APPDATA/traefik2/acme:/acme:ro
+      - $SHARED/certs:/output:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Only needed if restarting containers
+    network_mode: none
+
+  # DuckDNS - auto update DDNS
+  duckdns:
+    image: lscr.io/linuxserver/duckdns
+    container_name: duckdns
+    environment:
+      - PUID=$PUID #optional
+      - PGID=$PGID
+      - TZ=$TZ
+      - SUBDOMAINS=$DOMAINNAME
+      - TOKEN=$DUCKDNS_TOKEN
+      - LOG_FILE=false
+    volumes:
+      - $APPDATA/duckdns/config:/config
+    restart: unless-stopped

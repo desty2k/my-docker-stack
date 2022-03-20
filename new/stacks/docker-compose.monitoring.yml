@@ -1,0 +1,64 @@
+
+services:
+  telegraf:
+    image: telegraf:latest
+    container_name: telegraf
+    user: telegraf:995
+    restart: unless-stopped
+    devices:
+      - /dev/vchiq
+    ports:
+      - "8092:8092"
+      - "8094:8094"
+      - "8125:8125"
+    volumes:
+      - $APPDATA/telegraf/:/etc/telegraf/
+      - /:/hostfs:ro
+      - /opt/vc:/opt/vc
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      TZ: $TZ
+      HOST_ETC: /hostfs/etc
+      HOST_PROC: /hostfs/proc
+      HOST_SYS: /hostfs/sys
+      HOST_VAR: /hostfs/var
+      HOST_RUN: /hostfs/run
+      HOST_MOUNT_PREFIX: /hostfs
+      LD_LIBRARY_PATH: /opt/vc/lib
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "4000:3000"
+    volumes:
+      - $APPDATA/grafana:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: -/B@rtek40/-?
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      TZ: $TZ
+    labels:
+      traefik.enable: true
+      traefik.http.services.grafana-svc.loadbalancer.server.port: 3000
+      traefik.http.routers.grafana-rtr.rule: Host(`grafana.$DOMAINNAME`)
+      traefik.http.routers.grafana-rtr.entrypoints: websecure
+      traefik.http.routers.grafana-rtr.service: grafana-svc
+      traefik.http.routers.grafana-rtr.middlewares: chain-authentik@file
+
+  unifi:
+    image: jacobalberty/unifi
+    container_name: unifi
+    environment:
+      TZ: $TZ
+      PUID: 1000
+      PGID: 1000
+    volumes:
+      - $APPDATA/unifi:/unifi
+    ports:
+      - "3478:3478/udp"
+      - "8080:8080/tcp"
+      - "8443:8443/tcp"
+      - "10001:10001/udp"
+    restart: unless-stopped
+

@@ -1,0 +1,121 @@
+
+services:
+#  wireguard-sts:
+#    image: linuxserver/wireguard:latest
+#    container_name: wireguard-sts
+#    restart: unless-stopped
+#    cap_add:
+#      - NET_ADMIN
+#      - SYS_MODULE
+#    sysctls:
+#      net.ipv4.ip_forward: 1
+#      net.ipv4.conf.all.src_valid_mark: 1
+#    ports:
+#      - "61920:51820/udp"
+#      - "61921:51821/tcp"
+#    volumes:
+#      - $APPDATA/wireguard-sts:/config
+#    environment:
+#      TZ: $TZ
+#    networks:
+#      default:
+#        ipv4_address: 172.10.0.100
+
+  wg-easy:
+    image: weejewel/wg-easy
+    container_name: wg-easy
+    depends_on: [ unbound, pihole ]
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv4.conf.all.src_valid_mark: 1
+    dns:
+      - $VPN_PIHOLE_IP # Points to pihole
+      - $VPN_UNBOUND_IP # Points to unbound
+    ports:
+      - "51920:51820/udp"
+      - "51821:51821/tcp"
+    volumes:
+      - $APPDATA/wg-easy/:/etc/wireguard
+    environment:
+      WG_HOST: wireguard.$DOMAINNAME
+      PASSWORD: $WGEASY_PASSWORD
+      WG_PORT: 51920
+      WG_DEFAULT_ADDRESS: 10.6.0.x
+      WG_DEFAULT_DNS: $VPN_PIHOLE_IP
+      WG_ALLOWED_IPS: 192.168.10.0/24, 192.168.20.0/24, 10.10.0.0/24
+    labels:
+      traefik.enable: true
+      # admin panel
+      traefik.http.routers.wg-easy-rtr.service: wg-easy-svc
+      traefik.http.services.wg-easy-svc.loadbalancer.server.port: 51821
+      traefik.http.routers.wg-easy-rtr.rule: Host(`wg-easy-admin.$DOMAINNAME`)
+      traefik.http.routers.wg-easy-rtr.entrypoints: websecure
+      traefik.http.routers.wg-easy-rtr.middlewares: chain-authentik@file
+      # udp traffic
+      traefik.udp.routers.wg-easy-udp-rtr.entrypoints: wg-easy
+      traefik.udp.routers.wg-easy-udp-rtr.service: wg-easy-udp-svc
+      traefik.udp.services.wg-easy-udp-svc.loadbalancer.server.port: 51920
+    networks:
+      vpn:
+        ipv4_address: $VPN_WG_EASY_IP
+
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    depends_on: [ unbound ]
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - $VPN_UNBOUND_IP # Points to unbound
+      - 9.9.9.9
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "67:67/udp"
+      - "8090:80/tcp"
+    volumes:
+      - $APPDATA/pihole/pihole/:/etc/pihole/
+      - $APPDATA/pihole/dnsmasq.d/:/etc/dnsmasq.d/
+    environment:
+      TZ: $TZ
+      WEBPASSWORD: "" # Password - can be changed later
+      ServerIP: $SERVER_IP # Internal IP of pihole
+      PIHOLE_DNS_: $VPN_UNBOUND_IP;$VPN_UNBOUND_IP
+    networks:
+      default:
+        ipv4_address: $INTERNAL_PIHOLE_IP
+      vpn:
+        ipv4_address: $VPN_PIHOLE_IP
+
+  unbound:
+    image: mvance/unbound-rpi:1.13.1
+    container_name: unbound
+    restart: unless-stopped
+    volumes:
+      - $APPDATA/unbound:/opt/unbound/etc/unbound/
+    environment:
+      TZ: $TZ
+    networks:
+      vpn:
+        ipv4_address: $VPN_UNBOUND_IP
+
+  ntp:
+    image: cturra/ntp:latest
+    container_name: ntp
+    restart: always
+    ports:
+      - "123:123/udp"
+    read_only: true
+    tmpfs:
+      - /etc/chrony:rw,mode=1750
+      - /run/chrony:rw,mode=1750
+      - /var/lib/chrony:rw,mode=1750
+    environment:
+      TZ: $TZ
+      NTP_SERVERS: pl.pool.ntp.org
+      LOG_LEVEL: 0

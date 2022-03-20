@@ -1,0 +1,33 @@
+
+services:
+  portainer:
+    image: portainer/portainer-ce
+    container_name: portainer
+    restart: unless-stopped
+    command: -H unix:///var/run/docker.sock
+    ports:
+      - "9000:9000"
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - $APPDATA/portainer:/data
+    environment:
+      TZ: $TZ
+    labels:
+      traefik.enable: true
+      traefik.http.services.portainer-svc.loadbalancer.server.port: 9000
+      traefik.http.routers.portainer-rtr.service: portainer-svc
+      traefik.http.routers.portainer-rtr.rule: Host(`portainer.$DOMAINNAME`)
+      traefik.http.routers.portainer-rtr.entrypoints: websecure
+      traefik.http.routers.portainer-rtr.middlewares: chain-authentik@file
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: always
+    command: --schedule "0 0 3 * * *" --cleanup
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      TZ: $TZ
+
